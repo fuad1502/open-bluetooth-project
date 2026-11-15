@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools >= 77.0.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ble-phy-sim"
+authors = [
+  {name = "Fuad Ismail", email = "fuad1502@gmail.com"},
+]
+dynamic = ["version"]
+
+[project.scripts]
+ble-phy-sim = "ble_phy_sim:main"
