@@ -22,31 +22,35 @@ def get_ble_channel_freq(channel_idx: int) -> float:
         return 2480e6
 
 
-def get_channel_iq_data(
-    data: NDArray[np.complex64],
-    center_frequency: float,
-    sample_rate: float,
-    channel_idx: int,
+def max2830_demod(
+    iq_in: NDArray[np.complex64],
+    fc_in: float,
+    fs_in: float,
+    f_lo: float,
 ) -> NDArray[np.complex64]:
-    delta_freq = get_ble_channel_freq(channel_idx) - center_frequency
-    t = np.arange(len(data)) / sample_rate
-    return data * np.exp(-1j * 2 * np.pi * delta_freq * t)
-
-
-def decimate(
-    data: NDArray[np.complex64], sample_rate: float, target_sample_rate: float
-) -> NDArray[np.complex64]:
-    # Create FIR filter
-    num_taps = 1001
-    cutoff = target_sample_rate / 2 * 0.8
-    fir_taps = sig.firwin(num_taps, cutoff, fs=sample_rate)
-
-    # Filter & resample
-    resampled_data = sig.resample_poly(
-        data, 1, sample_rate / target_sample_rate, window=fir_taps
+    # Shift to target channel frequency
+    delta_freq = f_lo - fc_in
+    t = np.arange(len(iq_in)) / fs_in
+    iq_shifted = iq_in.astype(np.complex128) * np.exp(
+        -1j * 2 * np.pi * delta_freq * t
     )
 
-    return resampled_data
+    # MAX2830 baseband LPF
+    cutoff = 7.5e6
+    sos_lpf = sig.butter(6, cutoff, btype="lowpass", fs=fs_in, output="sos")
+
+    # MAX2830 baseband HPF
+    sos_hpf = sig.butter(1, 100, btype="highpass", fs=fs_in, output="sos")
+
+    # MAX2830 response
+    sos_max2830 = np.vstack((sos_lpf, sos_hpf))
+
+    # Filter & resample
+    iq_filtered = sig.sosfilt(sos_max2830, iq_shifted)
+
+    # Decimate to 20 MSPS
+    r = int(fs_in / 20e6)
+    return iq_filtered[::r].astype(np.complex64)
 
 
 def main() -> None:
@@ -56,45 +60,53 @@ def main() -> None:
 
     data_file_path = sys.argv[1]
 
-    # Data
+    # Original IQ data
     dtype = np.dtype(np.complex64)
-    sample_rate = 100e6
-    center_frequency = 2441.5e6
-    data = np.fromfile(data_file_path, dtype=dtype)
+    fs_in = 100e6
+    fc_in = 2441.5e6
+    iq = np.fromfile(data_file_path, dtype=dtype)
 
-    # Get channel data
-    target_channel_idx = 39
-    target_center_frequency = get_ble_channel_freq(target_channel_idx)
-    channel_data = get_channel_iq_data(
-        data, center_frequency, sample_rate, target_channel_idx
-    )
+    # Get channel frequency
+    ch_idx = 39
+    lo_f = get_ble_channel_freq(ch_idx)
 
-    # Decimate
-    target_sample_rate = 2e6
-    decimated_channel_data = decimate(
-        channel_data, sample_rate, target_sample_rate
-    )
-
-    # Retarget
-    center_frequency = target_center_frequency
-    sample_rate = target_sample_rate
-    data = decimated_channel_data
+    # Get IQ data from MAX2830
+    iq_max2830 = max2830_demod(iq, fc_in, fs_in, lo_f)
 
     # FFT
-    fft_result = np.fft.fft(data)
-    freq_axis = np.fft.fftfreq(len(fft_result), 1 / sample_rate)
-    freq_axis_shifted = freq_axis + center_frequency
+    input_fft = np.fft.fft(iq)
+    input_freqs = np.fft.fftfreq(len(input_fft), 1 / 100e6) + fc_in
+    max2830_fft = np.fft.fft(iq_max2830)
+    max2830_freqs = np.fft.fftfreq(len(max2830_fft), 1 / 20e6)
 
     # Setup plot
-    _, ax = plt.subplots(figsize=(12, 5))
-    ax.plot(freq_axis_shifted, 20 * np.log10(np.abs(fft_result)))
-    ax.xaxis.set_major_formatter(ScalarFormatter(useMathText=True))
-    ax.yaxis.set_major_formatter(ScalarFormatter(useMathText=True))
-    ax.set_xlabel("Frequency (Hz)")
-    ax.set_ylabel("Amplitude (dB)")
-    ax.grid()
-    ax.set_title("FFT")
-    ax.set_ylim(-60)
+    _, axs = plt.subplots(2, 1)
+
+    # 100 MSPS data
+    axs[0].plot(input_freqs, 20 * np.log10(np.abs(input_fft)))
+    axs[0].xaxis.set_major_formatter(ScalarFormatter(useMathText=True))
+    axs[0].yaxis.set_major_formatter(ScalarFormatter(useMathText=True))
+    axs[0].set_xlabel("Frequency (Hz)")
+    axs[0].set_ylabel("Amplitude (dB)")
+    axs[0].set_title(
+        f"Input I/Q FFT (Fc = {fc_in / 1e6} MHz, Fs = {fs_in / 1e6} MSPS)"
+    )
+    axs[0].grid()
+    axs[0].set_ylim(-60, 30)
+    axs[0].set_xticks(np.arange(2400e6, 2482e6, 2e6))
+    axs[0].set_xlim(2401e6, 2481e6)
+
+    # MAX2830 data
+    axs[1].plot(max2830_freqs, 20 * np.log10(np.abs(max2830_fft)))
+    axs[1].xaxis.set_major_formatter(ScalarFormatter(useMathText=True))
+    axs[1].yaxis.set_major_formatter(ScalarFormatter(useMathText=True))
+    axs[1].set_xlabel("Frequency (Hz)")
+    axs[1].set_ylabel("Amplitude (dB)")
+    axs[1].set_title(f"MAX2830 I/Q FFT (LO = {lo_f / 1e6} MHz, Fs = 20 MSPS)")
+    axs[1].grid()
+    axs[1].set_ylim(-60, 30)
+    axs[1].set_xticks(np.arange(-10e6, 10e6, 2e6))
+    axs[1].set_xlim(-10e6, 10e6)
 
     # Plot
     plt.show()
