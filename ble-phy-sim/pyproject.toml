@@ -8,6 +8,11 @@ authors = [
   {name = "Fuad Ismail", email = "fuad1502@gmail.com"},
 ]
 dynamic = ["version"]
+dependencies = [
+  "numpy",
+  "scipy",
+  "matplotlib"
+]
 
 [project.scripts]
 ble-phy-sim = "ble_phy_sim:main"
