@@ -97,6 +97,12 @@ def cic_decimator(
     return iq_out
 
 
+def gfsk_demodulator(iq_in: NDArray[np.complex64]) -> NDArray[np.float64]:
+    iq_delay = iq_in[1:]
+    delay_conj_mult = iq_in[:-1] * np.conj(iq_delay)
+    return np.atan2(delay_conj_mult.imag, delay_conj_mult.real)
+
+
 def main() -> None:
     if len(sys.argv) != 2:
         print("Usage: ble_phy_sim <data_file_path>")
@@ -120,6 +126,9 @@ def main() -> None:
     # Baseband processing: decimate to 4 MSPS. Passband @ 1 MHz
     decimated_iq = cic_decimator(iq_max2830, 4, 5, 2, 0.25, 31)
 
+    # Demodulate
+    demod = gfsk_demodulator(decimated_iq)
+
     # FFT
     input_fft = np.fft.fft(iq) / len(iq)
     input_freqs = np.fft.fftfreq(len(input_fft), 1 / 100e6) + fc_in
@@ -132,6 +141,7 @@ def main() -> None:
     layout = [
         ["A", "A"],
         ["B", "C"],
+        ["D", "D"],
     ]
     _, axs = plt.subplot_mosaic(layout)
 
@@ -149,7 +159,7 @@ def main() -> None:
     axs["A"].set_xlim(2401e6, 2481e6)
     axs["A"].grid()
 
-    # Channel specture
+    # Channel spectrum
     axs["B"].plot(
         input_freqs - lo_f,
         20 * np.log10(np.abs(input_fft)),
@@ -182,8 +192,14 @@ def main() -> None:
     axs["C"].set_title("I/Q plot")
     axs["C"].plot(iq_max2830.real, iq_max2830.imag, label="MAX2830 spectrum")
     axs["C"].plot(decimated_iq.real, decimated_iq.imag, label="4 MSPS spectrum")
-    axs["B"].legend()
+    axs["C"].legend()
     axs["C"].grid()
+
+    # Demod plot
+    axs["D"].set_title("Demodulated plot")
+    axs["D"].plot(np.arange(0, len(demod) / 4e6, 1 / 4e6), demod)
+    axs["D"].set_ylim(-0.5, 0.5)
+    axs["D"].grid()
 
     # Plot
     plt.show()
