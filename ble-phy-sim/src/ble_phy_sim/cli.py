@@ -145,6 +145,12 @@ def main() -> None:
     demod = gfsk_demodulator(decimated_iq)
     rssi = detect_rssi(decimated_iq, -70, 4)
 
+    # 1. Detect CFO from preamble
+    # 2. Recover symbol timing (Gardner Loop)
+    # 3. Bit detector
+    # 4. Synchronize frame with access address
+    # 5. Obtain PDU & CRC
+
     # FFT
     input_fft = np.fft.fft(iq) / len(iq)
     input_freqs = np.fft.fftfreq(len(input_fft), 1 / 100e6) + fc_in
