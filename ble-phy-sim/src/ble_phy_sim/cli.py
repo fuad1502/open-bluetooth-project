@@ -103,6 +103,21 @@ def gfsk_demodulator(iq_in: NDArray[np.complex64]) -> NDArray[np.float64]:
     return np.atan2(delay_conj_mult.imag, delay_conj_mult.real)
 
 
+def detect_rssi(
+    iq_in: NDArray[np.complex64], threshold: float, averaging: int
+) -> NDArray[np.float64]:
+    amplitude = np.abs(iq_in)
+    amplitude = sig.lfilter(np.ones(averaging) / averaging, [1.0], amplitude)
+    power = 20 * np.log10(amplitude)
+
+    detected = np.zeros_like(iq_in, dtype=np.float64)
+    for i in np.arange(0, len(amplitude)):
+        if power[i] > threshold:
+            detected[i] = 1.0
+
+    return detected
+
+
 def main() -> None:
     if len(sys.argv) != 2:
         print("Usage: ble_phy_sim <data_file_path>")
@@ -128,6 +143,7 @@ def main() -> None:
 
     # Demodulate
     demod = gfsk_demodulator(decimated_iq)
+    rssi = detect_rssi(decimated_iq, -70, 4)
 
     # FFT
     input_fft = np.fft.fft(iq) / len(iq)
@@ -197,7 +213,7 @@ def main() -> None:
 
     # Demod plot
     axs["D"].set_title("Demodulated plot")
-    axs["D"].plot(np.arange(0, len(demod) / 4e6, 1 / 4e6), demod)
+    axs["D"].plot(np.arange(len(demod)), demod * rssi[:-1])
     axs["D"].set_ylim(-0.5, 0.5)
     axs["D"].grid()
 
