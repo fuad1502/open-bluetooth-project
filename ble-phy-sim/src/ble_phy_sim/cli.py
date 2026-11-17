@@ -53,6 +53,50 @@ def max2830_demod(
     return iq_filtered[::r].astype(np.complex64)
 
 
+def cic_decimator(
+    iq_in: NDArray[np.complex64],
+    stages: int,
+    r: int,
+    n: int,
+    pass_band: float,
+    taps: int,
+) -> NDArray[np.complex64]:
+    # Integrator
+    iq_out = iq_in
+
+    for _ in range(stages):
+        iq_out = sig.lfilter([1.0], [1.0, -1.0], iq_out)
+    pass
+
+    # Downsample
+    iq_out = iq_out[::r]
+
+    # Comb
+    b_comb = np.zeros(n + 1, dtype=np.float64)
+    b_comb[0] = 1.0
+    b_comb[-1] = -1.0
+    for _ in range(stages):
+        iq_out = sig.lfilter(b_comb, [1.0], iq_out)
+
+    # DC gain compensation
+    dc_gain = (r * n) ** stages
+    iq_out = iq_out / dc_gain
+
+    # Compensation FIR filter
+    fp = np.linspace(0, pass_band, 100)
+    gp = (np.sinc(fp / r) / np.sinc(fp * n)) ** stages
+    fs = np.linspace(min(pass_band + 0.1, 0.45), 0.5, 100)
+    gs = np.zeros_like(fs)
+
+    f = np.concatenate([fp, fs])
+    g = np.concatenate([gp, gs])
+    fir = sig.firwin2(taps, f, g, fs=1.0)
+
+    iq_out = sig.lfilter(fir, [1.0], iq_out)
+
+    return iq_out
+
+
 def main() -> None:
     if len(sys.argv) != 2:
         print("Usage: ble_phy_sim <data_file_path>")
@@ -73,40 +117,63 @@ def main() -> None:
     # Get IQ data from MAX2830
     iq_max2830 = max2830_demod(iq, fc_in, fs_in, lo_f)
 
+    # Baseband processing: decimate to 4 MSPS. Passband @ 1 MHz
+    decimated_iq = cic_decimator(iq_max2830, 4, 5, 2, 0.25, 31)
+
     # FFT
-    input_fft = np.fft.fft(iq)
+    input_fft = np.fft.fft(iq) / len(iq)
     input_freqs = np.fft.fftfreq(len(input_fft), 1 / 100e6) + fc_in
-    max2830_fft = np.fft.fft(iq_max2830)
+    max2830_fft = np.fft.fft(iq_max2830) / len(iq_max2830)
     max2830_freqs = np.fft.fftfreq(len(max2830_fft), 1 / 20e6)
+    decimated_fft = np.fft.fft(decimated_iq) / len(decimated_iq)
+    decimated_freqs = np.fft.fftfreq(len(decimated_fft), 1 / 4e6)
 
     # Setup plot
-    _, axs = plt.subplots(2, 1)
+    layout = [
+        ["A", "A"],
+        ["B", "C"],
+    ]
+    _, axs = plt.subplot_mosaic(layout)
 
     # 100 MSPS data
-    axs[0].plot(input_freqs, 20 * np.log10(np.abs(input_fft)))
-    axs[0].xaxis.set_major_formatter(ScalarFormatter(useMathText=True))
-    axs[0].yaxis.set_major_formatter(ScalarFormatter(useMathText=True))
-    axs[0].set_xlabel("Frequency (Hz)")
-    axs[0].set_ylabel("Amplitude (dB)")
-    axs[0].set_title(
+    axs["A"].plot(input_freqs, 20 * np.log10(np.abs(input_fft)))
+    axs["A"].xaxis.set_major_formatter(ScalarFormatter(useMathText=True))
+    axs["A"].yaxis.set_major_formatter(ScalarFormatter(useMathText=True))
+    axs["A"].set_xlabel("Frequency (Hz)")
+    axs["A"].set_ylabel("Amplitude (dB)")
+    axs["A"].set_title(
         f"Input I/Q FFT (Fc = {fc_in / 1e6} MHz, Fs = {fs_in / 1e6} MSPS)"
     )
-    axs[0].grid()
-    axs[0].set_ylim(-60, 30)
-    axs[0].set_xticks(np.arange(2400e6, 2482e6, 2e6))
-    axs[0].set_xlim(2401e6, 2481e6)
+    axs["A"].grid()
+    axs["A"].set_ylim(-150, -80)
+    axs["A"].set_xticks(np.arange(2400e6, 2482e6, 2e6))
+    axs["A"].set_xlim(2401e6, 2481e6)
 
     # MAX2830 data
-    axs[1].plot(max2830_freqs, 20 * np.log10(np.abs(max2830_fft)))
-    axs[1].xaxis.set_major_formatter(ScalarFormatter(useMathText=True))
-    axs[1].yaxis.set_major_formatter(ScalarFormatter(useMathText=True))
-    axs[1].set_xlabel("Frequency (Hz)")
-    axs[1].set_ylabel("Amplitude (dB)")
-    axs[1].set_title(f"MAX2830 I/Q FFT (LO = {lo_f / 1e6} MHz, Fs = 20 MSPS)")
-    axs[1].grid()
-    axs[1].set_ylim(-60, 30)
-    axs[1].set_xticks(np.arange(-10e6, 10e6, 2e6))
-    axs[1].set_xlim(-10e6, 10e6)
+    axs["B"].plot(max2830_freqs, 20 * np.log10(np.abs(max2830_fft)))
+    axs["B"].xaxis.set_major_formatter(ScalarFormatter(useMathText=True))
+    axs["B"].yaxis.set_major_formatter(ScalarFormatter(useMathText=True))
+    axs["B"].set_xlabel("Frequency (Hz)")
+    axs["B"].set_ylabel("Amplitude (dB)")
+    axs["B"].set_title(f"MAX2830 I/Q FFT (LO = {lo_f / 1e6} MHz, Fs = 20 MSPS)")
+    axs["B"].grid()
+    axs["B"].set_ylim(-150, -80)
+    axs["B"].set_xticks(np.arange(-2e6, 2e6, 500e3))
+    axs["B"].set_xlim(-2e6, 2e6)
+
+    # 4 MSPS data
+    axs["C"].plot(decimated_freqs, 20 * np.log10(np.abs(decimated_fft)))
+    axs["C"].xaxis.set_major_formatter(ScalarFormatter(useMathText=True))
+    axs["C"].yaxis.set_major_formatter(ScalarFormatter(useMathText=True))
+    axs["C"].set_xlabel("Frequency (Hz)")
+    axs["C"].set_ylabel("Amplitude (dB)")
+    axs["C"].set_title(
+        f"Decimated I/Q FFT (LO = {lo_f / 1e6} MHz, Fs = 4 MSPS)"
+    )
+    axs["C"].grid()
+    axs["C"].set_ylim(-150, -80)
+    axs["C"].set_xticks(np.arange(-2e6, 2e6, 500e3))
+    axs["C"].set_xlim(-2e6, 2e6)
 
     # Plot
     plt.show()
