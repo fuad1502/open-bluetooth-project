@@ -135,45 +135,55 @@ def main() -> None:
     ]
     _, axs = plt.subplot_mosaic(layout)
 
-    # 100 MSPS data
+    # Input specturm
     axs["A"].plot(input_freqs, 20 * np.log10(np.abs(input_fft)))
+    axs["A"].plot(max2830_freqs, 20 * np.log10(np.abs(max2830_fft)))
+    axs["A"].plot(decimated_freqs, 20 * np.log10(np.abs(decimated_fft)))
     axs["A"].xaxis.set_major_formatter(ScalarFormatter(useMathText=True))
     axs["A"].yaxis.set_major_formatter(ScalarFormatter(useMathText=True))
     axs["A"].set_xlabel("Frequency (Hz)")
     axs["A"].set_ylabel("Amplitude (dB)")
-    axs["A"].set_title(
-        f"Input I/Q FFT (Fc = {fc_in / 1e6} MHz, Fs = {fs_in / 1e6} MSPS)"
-    )
-    axs["A"].grid()
+    axs["A"].set_title(f"Input I/Q FFT (Fs = {fs_in / 1e6} MSPS)")
     axs["A"].set_ylim(-150, -80)
     axs["A"].set_xticks(np.arange(2400e6, 2482e6, 2e6))
     axs["A"].set_xlim(2401e6, 2481e6)
+    axs["A"].grid()
 
-    # MAX2830 data
-    axs["B"].plot(max2830_freqs, 20 * np.log10(np.abs(max2830_fft)))
+    # Channel specture
+    axs["B"].plot(
+        input_freqs - lo_f,
+        20 * np.log10(np.abs(input_fft)),
+        label="Input spectrum",
+    )
+    axs["B"].plot(
+        max2830_freqs,
+        20 * np.log10(np.abs(max2830_fft)),
+        label="MAX2830 spectrum",
+    )
+    axs["B"].plot(
+        decimated_freqs,
+        20 * np.log10(np.abs(decimated_fft)),
+        label="4 MSPS spectrum",
+    )
     axs["B"].xaxis.set_major_formatter(ScalarFormatter(useMathText=True))
     axs["B"].yaxis.set_major_formatter(ScalarFormatter(useMathText=True))
     axs["B"].set_xlabel("Frequency (Hz)")
     axs["B"].set_ylabel("Amplitude (dB)")
-    axs["B"].set_title(f"MAX2830 I/Q FFT (LO = {lo_f / 1e6} MHz, Fs = 20 MSPS)")
-    axs["B"].grid()
+    axs["B"].set_title(
+        f"Input I/Q FFT (Fc = {lo_f / 1e6} MHz, Fs = {fs_in / 1e6} MSPS, 20 MSPS, 4 MSPS)"
+    )
     axs["B"].set_ylim(-150, -80)
     axs["B"].set_xticks(np.arange(-2e6, 2e6, 500e3))
     axs["B"].set_xlim(-2e6, 2e6)
+    axs["B"].grid()
+    axs["B"].legend()
 
-    # 4 MSPS data
-    axs["C"].plot(decimated_freqs, 20 * np.log10(np.abs(decimated_fft)))
-    axs["C"].xaxis.set_major_formatter(ScalarFormatter(useMathText=True))
-    axs["C"].yaxis.set_major_formatter(ScalarFormatter(useMathText=True))
-    axs["C"].set_xlabel("Frequency (Hz)")
-    axs["C"].set_ylabel("Amplitude (dB)")
-    axs["C"].set_title(
-        f"Decimated I/Q FFT (LO = {lo_f / 1e6} MHz, Fs = 4 MSPS)"
-    )
+    # IQ plot
+    axs["C"].set_title("I/Q plot")
+    axs["C"].plot(iq_max2830.real, iq_max2830.imag, label="MAX2830 spectrum")
+    axs["C"].plot(decimated_iq.real, decimated_iq.imag, label="4 MSPS spectrum")
+    axs["B"].legend()
     axs["C"].grid()
-    axs["C"].set_ylim(-150, -80)
-    axs["C"].set_xticks(np.arange(-2e6, 2e6, 500e3))
-    axs["C"].set_xlim(-2e6, 2e6)
 
     # Plot
     plt.show()
