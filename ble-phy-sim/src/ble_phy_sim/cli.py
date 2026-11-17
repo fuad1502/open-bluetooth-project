@@ -99,23 +99,8 @@ def cic_decimator(
 
 def gfsk_demodulator(iq_in: NDArray[np.complex64]) -> NDArray[np.float64]:
     iq_delay = iq_in[1:]
-    delay_conj_mult = iq_in[:-1] * np.conj(iq_delay)
+    delay_conj_mult = np.conj(iq_in[:-1]) * iq_delay
     return np.atan2(delay_conj_mult.imag, delay_conj_mult.real)
-
-
-def detect_rssi(
-    iq_in: NDArray[np.complex64], threshold: float, averaging: int
-) -> NDArray[np.float64]:
-    amplitude = np.abs(iq_in)
-    amplitude = sig.lfilter(np.ones(averaging) / averaging, [1.0], amplitude)
-    power = 20 * np.log10(amplitude)
-
-    detected = np.zeros_like(iq_in, dtype=np.float64)
-    for i in np.arange(0, len(amplitude)):
-        if power[i] > threshold:
-            detected[i] = 1.0
-
-    return detected
 
 
 def main() -> None:
@@ -142,14 +127,22 @@ def main() -> None:
     decimated_iq = cic_decimator(iq_max2830, 4, 5, 2, 0.25, 31)
 
     # Demodulate
-    demod = gfsk_demodulator(decimated_iq)
-    rssi = detect_rssi(decimated_iq, -70, 4)
+    demod = gfsk_demodulator(decimated_iq).clip(-0.3 * np.pi, 0.3 * np.pi)
 
     # 1. Detect CFO from preamble
-    # 2. Recover symbol timing (Gardner Loop)
-    # 3. Bit detector
-    # 4. Synchronize frame with access address
-    # 5. Obtain PDU & CRC
+    cfo_est_len = 6 * 4
+    cfo = sig.lfilter(np.ones(cfo_est_len) / cfo_est_len, [1], demod)
+
+    # 2. Access address correlation
+    access_addr = 0x8E89BED6
+    aa_bits = np.array([int(bit) for bit in f"{access_addr:032b}"])
+    aa_bits = aa_bits * 2 - 1
+    aa_corr = sig.lfilter(aa_bits.repeat(4), [1], demod) / 32 / 4 > 0.25
+
+    # 3. Recover symbol timing (Gardner Loop)
+    # 4. Bit detector
+    # 5. Synchronize frame with access address
+    # 6. Obtain PDU & CRC
 
     # FFT
     input_fft = np.fft.fft(iq) / len(iq)
@@ -219,7 +212,8 @@ def main() -> None:
 
     # Demod plot
     axs["D"].set_title("Demodulated plot")
-    axs["D"].plot(np.arange(len(demod)), demod * rssi[:-1])
+    axs["D"].plot(np.arange(len(demod)), demod)
+    axs["D"].plot(np.arange(len(aa_corr)), aa_corr)
     axs["D"].set_ylim(-0.5, 0.5)
     axs["D"].grid()
 
