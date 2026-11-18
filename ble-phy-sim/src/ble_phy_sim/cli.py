@@ -103,6 +103,71 @@ def gfsk_demodulator(iq_in: NDArray[np.complex64]) -> NDArray[np.float64]:
     return np.atan2(delay_conj_mult.imag, delay_conj_mult.real)
 
 
+def bits_to_int(bits: list[int]) -> int:
+    return sum(x << i for i, x in enumerate(bits))
+
+def dewhiten(bits: list[int], channel_idx: int) -> list[int]:
+    pos = [1] + [(channel_idx >> (5 - i)) & 1 for i in range(6)]
+    out: list[int] = []
+
+    for b in bits:
+        feedback = pos[6]
+        out.append(int(b) ^ feedback)
+
+        # Clock LFSR (x^7 + x^4 + 1)
+        new_pos0 = feedback
+        new_pos4 = pos[3] ^ feedback
+        pos[6] = pos[5]
+        pos[5] = pos[4]
+        pos[4] = new_pos4
+        pos[3] = pos[2]
+        pos[2] = pos[1]
+        pos[1] = pos[0]
+        pos[0] = new_pos0
+
+    return out
+
+def calculate_crc(bits: list[int]) -> list[int]:
+    pos = [(0x555555 >> i) & 1 for i in range(24)]
+
+    for b in bits:
+        feedback = pos[23] ^ int(b)
+
+        # Clock LFSR (x^24 + x^10 + x^9 + x^6 + x^4 + x^3 + x + 1)
+        new_pos0 = feedback
+        new_pos1 = pos[0] ^ feedback
+        new_pos3 = pos[2] ^ feedback
+        new_pos4 = pos[3] ^ feedback
+        new_pos6 = pos[5] ^ feedback
+        new_pos9 = pos[8] ^ feedback
+        new_pos10 = pos[9] ^ feedback
+        pos[23] = pos[22]
+        pos[22] = pos[21]
+        pos[21] = pos[20]
+        pos[20] = pos[19]
+        pos[19] = pos[18]
+        pos[18] = pos[17]
+        pos[17] = pos[16]
+        pos[16] = pos[15]
+        pos[15] = pos[14]
+        pos[14] = pos[13]
+        pos[13] = pos[12]
+        pos[12] = pos[11]
+        pos[11] = pos[10]
+        pos[10] = new_pos10
+        pos[9] = new_pos9 
+        pos[8] = pos[7]
+        pos[7] = pos[6]
+        pos[6] = new_pos6 
+        pos[5] = pos[4]
+        pos[4] = new_pos4
+        pos[3] = new_pos3
+        pos[2] = pos[1]
+        pos[1] = new_pos1
+        pos[0] = new_pos0
+
+    return pos[::-1]
+
 def main() -> None:
     if len(sys.argv) != 2:
         print("Usage: ble_phy_sim <data_file_path>")
@@ -124,7 +189,7 @@ def main() -> None:
     iq_max2830 = max2830_demod(iq, fc_in, fs_in, lo_f)
 
     # ==========================================================================
-    # BASEBAND
+    # BASEBAND (FPGA)
     # ==========================================================================
 
     # Decimate to 4 MSPS. Passband @ 1 MHz
@@ -199,8 +264,55 @@ def main() -> None:
             corrected = False
 
     # Bit detector
+    bits = []
+    for i, sample in enumerate(samples):
+        if sample:
+            bits.append(detect[i] > 0)
+
     # Synchronize frame with access address
+    aa_start = 0
+    for i in range(len(samples)):
+        bit_array = bits[i : i + 32]
+        num = bits_to_int(bit_array)
+        if num == access_addr:
+            aa_start = i
+            break
+
     # Obtain PDU & CRC
+    pdu_start = aa_start + 32
+    dewhiten_out = dewhiten(bits[pdu_start:], ch_idx)
+
+    # PDU header (Advertising Physical Channel)
+    header = dewhiten_out[0:16]
+    pdu_type = bits_to_int(header[0:4])
+    rfu = bits_to_int(header[4:5])
+    chsel = bits_to_int(header[5:6])
+    txadd = bits_to_int(header[6:7])
+    rxadd = bits_to_int(header[7:8])
+    print(f"PDU Type = {pdu_type}")
+    print(f"RFU = {rfu}")
+    print(f"CH sel = {chsel}")
+    print(f"TX Add = {txadd}")
+    print(f"Rx Add = {rxadd}")
+    pdu_length = bits_to_int(header[8:16])
+    pdu = dewhiten_out[0 : (pdu_length + 2) * 8]
+
+    # CRC
+    crc = bits_to_int(dewhiten_out[(pdu_length + 2) * 8 : (pdu_length + 2) * 8 + 24])
+    calculated_crc = calculate_crc(pdu)
+    print(f"Received CRC: {hex(crc)}")
+    print(f"Calculated CRC: {hex(bits_to_int(calculated_crc))}")
+
+    # ==========================================================================
+    # LINK LAYER CONTROL (MCU)
+    # ==========================================================================
+
+    # Payload (PDU Type: ADV_IND)
+    payload = pdu[16:]
+    adv_a = bits_to_int(payload[0 : 6 * 8])
+    adv_data = payload[6 * 8 :]
+    print(f"AdvA: {hex(adv_a)}")
+    print(f"AdvData: {adv_data}")
 
     # ==========================================================================
     # PLOTTING
@@ -299,9 +411,12 @@ def main() -> None:
     )
     axs["E"].stem(np.arange(len(samples)), samples, label="samples")
     axs["E"].set_ylim(-0.5, 0.5)
-    axs["E"].set_xlim(0, 128 * 4)
+    axs["E"].set_xlim(0, (8 + 32 + 16 + pdu_length * 8) * 4)
     axs["E"].grid()
     axs["E"].legend()
 
     # Plot
     plt.show()
+
+if __name__ == "__main__":
+    main()
