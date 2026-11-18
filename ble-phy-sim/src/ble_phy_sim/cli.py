@@ -138,7 +138,7 @@ def main() -> None:
     # Detect CFO from preamble
     cfo_est_len = 6 * 4
     cfo = sig.lfilter(np.ones(cfo_est_len) / cfo_est_len, [1], demod)
-    delay = np.zeros(32 * 4)
+    delay = np.zeros(32 * 4 + 1)
     delay[-1] = 1.0
     cfo = sig.lfilter(delay, [1], cfo)
 
@@ -150,11 +150,50 @@ def main() -> None:
     aa_avg = sig.lfilter(np.ones_like(aa_bits.repeat(4)), [1], demod) / 32 / 4
     aa_corr_dc_free = aa_corr - aa_avg * np.sum(aa_bits)
 
-    ## Matched signal
+    # Matched signal
     aa_match = (aa_corr_dc_free > 32) * magnitude_ok
     cfo_match = cfo * aa_match
 
+    # Isolate frames
+    match_locations = []
+    cfos = []
+    for i, match in enumerate(aa_match):
+        if match:
+            match_locations.append(i - (32 + 6) * 4)
+            cfos.append(cfo_match[i])
+
+    # Choose frame
+    match_location = match_locations[0]
+    cfo = cfos[0]
+
     # Recover symbol timing (Gardner Loop)
+    detect = demod[match_location:] - cfo
+    detect_delay_2 = sig.lfilter([0, 0, 1], [1], detect)
+    detect_delay_4 = sig.lfilter([0, 0, 0, 0, 1], [1], detect)
+
+    kp = 0.125
+    phase = 0
+    phase_error_acc = 0
+    phase_error_accs = np.zeros_like(detect)
+    samples = np.zeros_like(detect)
+    corrected = False
+    for i, _ in enumerate(detect):
+        if i % 4 == phase % 4 and not corrected:
+            error = detect_delay_2[i] * (detect[i] - detect_delay_4[i])
+            phase_error_acc += error * kp
+            phase_error_accs[i] = phase_error_acc
+            samples[i] = 0.3
+        if phase_error_acc > 0.25:
+            phase_error_acc -= 0.25
+            phase -= 1
+            corrected = True
+        elif phase_error_acc < -0.25:
+            phase_error_acc += 0.25
+            phase += 1
+            corrected = True
+        else:
+            corrected = False
+
     # Bit detector
     # Synchronize frame with access address
     # Obtain PDU & CRC
@@ -168,12 +207,15 @@ def main() -> None:
     decimated_freqs = np.fft.fftfreq(len(decimated_fft), 1 / 4e6)
 
     # Setup plot
+    plt.style.use("dark_background")
     layout = [
         ["A", "A"],
         ["B", "C"],
         ["D", "D"],
+        ["E", "E"],
     ]
-    _, axs = plt.subplot_mosaic(layout)
+    fig, axs = plt.subplot_mosaic(layout)
+    fig.tight_layout()
 
     # Input specturm
     axs["A"].plot(input_freqs, 20 * np.log10(np.abs(input_fft)))
@@ -227,12 +269,31 @@ def main() -> None:
 
     # Demod plot
     axs["D"].set_title("Demodulated plot")
-    axs["D"].plot(np.arange(len(demod)), demod)
-    axs["D"].plot(np.arange(len(aa_match)), aa_match)
-    axs["D"].plot(np.arange(len(cfo_match)), cfo_match)
-    axs["D"].plot(np.arange(len(magnitude_ok)), magnitude_ok)
+    axs["D"].plot(np.arange(len(demod)), demod, label="Demodulated signal")
+    axs["D"].plot(
+        np.arange(len(aa_match)), aa_match, label="Access Address Match"
+    )
+    axs["D"].plot(np.arange(len(cfo_match)), cfo_match, label="CFO @ match")
+    axs["D"].plot(
+        np.arange(len(magnitude_ok)), magnitude_ok, label="Magnitude OK"
+    )
     axs["D"].set_ylim(-0.5, 0.5)
     axs["D"].grid()
+    axs["D"].legend()
+
+    # Frame plot
+    axs["E"].set_title("Frame plot")
+    axs["E"].plot(np.arange(len(detect)), detect, label="Detect")
+    axs["E"].plot(
+        np.arange(len(phase_error_accs)),
+        phase_error_accs,
+        label="Phase accumulator",
+    )
+    axs["E"].stem(np.arange(len(samples)), samples, label="samples")
+    axs["E"].set_ylim(-0.5, 0.5)
+    axs["E"].set_xlim(0, 128 * 4)
+    axs["E"].grid()
+    axs["E"].legend()
 
     # Plot
     plt.show()
