@@ -123,7 +123,11 @@ def main() -> None:
     # Get IQ data from MAX2830
     iq_max2830 = max2830_demod(iq, fc_in, fs_in, lo_f)
 
-    # Baseband processing: decimate to 4 MSPS. Passband @ 1 MHz
+    # ==========================================================================
+    # BASEBAND
+    # ==========================================================================
+
+    # Decimate to 4 MSPS. Passband @ 1 MHz
     decimated_iq = cic_decimator(iq_max2830, 4, 5, 2, 0.25, 31)
     decimated_iq = decimated_iq[0 : round(len(decimated_iq) / 4) * 4]
 
@@ -197,6 +201,10 @@ def main() -> None:
     # Bit detector
     # Synchronize frame with access address
     # Obtain PDU & CRC
+
+    # ==========================================================================
+    # PLOTTING
+    # ==========================================================================
 
     # FFT
     input_fft = np.fft.fft(iq) / len(iq)
