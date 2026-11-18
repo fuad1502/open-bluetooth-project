@@ -106,6 +106,18 @@ def gfsk_demodulator(iq_in: NDArray[np.complex64]) -> NDArray[np.float64]:
 def bits_to_int(bits: list[int]) -> int:
     return sum(x << i for i, x in enumerate(bits))
 
+
+def bits_to_bytes(bits: list[int]) -> list[int]:
+    if len(bits) % 8 != 0:
+        bits = bits + [0 in range(8 - len(bits) % 8)]
+
+    bytes = []
+    for i in range(int(len(bits) / 8)):
+        bytes.append(bits_to_int(bits[i * 8 : (i + 1) * 8]))
+
+    return bytes
+
+
 def dewhiten(bits: list[int], channel_idx: int) -> list[int]:
     pos = [1] + [(channel_idx >> (5 - i)) & 1 for i in range(6)]
     out: list[int] = []
@@ -126,6 +138,7 @@ def dewhiten(bits: list[int], channel_idx: int) -> list[int]:
         pos[0] = new_pos0
 
     return out
+
 
 def calculate_crc(bits: list[int]) -> list[int]:
     pos = [(0x555555 >> i) & 1 for i in range(24)]
@@ -155,10 +168,10 @@ def calculate_crc(bits: list[int]) -> list[int]:
         pos[12] = pos[11]
         pos[11] = pos[10]
         pos[10] = new_pos10
-        pos[9] = new_pos9 
+        pos[9] = new_pos9
         pos[8] = pos[7]
         pos[7] = pos[6]
-        pos[6] = new_pos6 
+        pos[6] = new_pos6
         pos[5] = pos[4]
         pos[4] = new_pos4
         pos[3] = new_pos3
@@ -167,6 +180,7 @@ def calculate_crc(bits: list[int]) -> list[int]:
         pos[0] = new_pos0
 
     return pos[::-1]
+
 
 def main() -> None:
     if len(sys.argv) != 2:
@@ -289,16 +303,18 @@ def main() -> None:
     chsel = bits_to_int(header[5:6])
     txadd = bits_to_int(header[6:7])
     rxadd = bits_to_int(header[7:8])
-    print(f"PDU Type = {pdu_type}")
-    print(f"RFU = {rfu}")
-    print(f"CH sel = {chsel}")
-    print(f"TX Add = {txadd}")
-    print(f"Rx Add = {rxadd}")
+    print(f"PDU Type: {pdu_type}")
+    print(f"RFU: {rfu}")
+    print(f"CH sel: {chsel}")
+    print(f"TX Add: {txadd}")
+    print(f"Rx Add: {rxadd}")
     pdu_length = bits_to_int(header[8:16])
     pdu = dewhiten_out[0 : (pdu_length + 2) * 8]
 
     # CRC
-    crc = bits_to_int(dewhiten_out[(pdu_length + 2) * 8 : (pdu_length + 2) * 8 + 24])
+    crc = bits_to_int(
+        dewhiten_out[(pdu_length + 2) * 8 : (pdu_length + 2) * 8 + 24]
+    )
     calculated_crc = calculate_crc(pdu)
     print(f"Received CRC: {hex(crc)}")
     print(f"Calculated CRC: {hex(bits_to_int(calculated_crc))}")
@@ -310,9 +326,21 @@ def main() -> None:
     # Payload (PDU Type: ADV_IND)
     payload = pdu[16:]
     adv_a = bits_to_int(payload[0 : 6 * 8])
-    adv_data = payload[6 * 8 :]
+    adv_data = bits_to_bytes(payload[6 * 8 :])
     print(f"AdvA: {hex(adv_a)}")
-    print(f"AdvData: {adv_data}")
+
+    # Advertising data
+    print(f"AdvData: ({len(adv_data)} bytes)")
+    ad_struct_start = 0
+    while ad_struct_start < len(adv_data):
+        data_length = adv_data[ad_struct_start]
+        ad_type = adv_data[ad_struct_start + 1]
+        if ad_type == 9:
+            ad_data = adv_data[
+                ad_struct_start + 2 : ad_struct_start + 2 + (data_length - 1)
+            ]
+            print(f"Complete Local Name: {bytes(ad_data).decode()}")
+        ad_struct_start += data_length + 1
 
     # ==========================================================================
     # PLOTTING
@@ -417,6 +445,7 @@ def main() -> None:
 
     # Plot
     plt.show()
+
 
 if __name__ == "__main__":
     main()
