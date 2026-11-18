@@ -240,107 +240,127 @@ def main() -> None:
     # Isolate frames
     match_locations = []
     cfos = []
+    was_match = False
     for i, match in enumerate(aa_match):
-        if match:
+        if match and not was_match:
             match_locations.append(i - (32 + 6) * 4)
             cfos.append(cfo_match[i])
+            was_match = True
+        elif not match:
+            was_match = False
 
-    # Choose frame
-    match_location = match_locations[0]
-    cfo = cfos[0]
+    # Declared here for plotting
+    detect = []
+    phase_error_accs = []
+    samples = []
+    pdu_length = 0
 
-    # Recover symbol timing (Gardner Loop)
-    detect = demod[match_location:] - cfo
-    detect_delay_2 = sig.lfilter([0, 0, 1], [1], detect)
-    detect_delay_4 = sig.lfilter([0, 0, 0, 0, 1], [1], detect)
+    # Decode frames
+    for i in range(len(match_locations)):
+        # Choose frame
+        match_location = match_locations[i]
+        cfo = cfos[i]
 
-    kp = 0.125
-    phase = 0
-    phase_error_acc = 0
-    phase_error_accs = np.zeros_like(detect)
-    samples = np.zeros_like(detect)
-    corrected = False
-    for i, _ in enumerate(detect):
-        if i % 4 == phase % 4 and not corrected:
-            error = detect_delay_2[i] * (detect[i] - detect_delay_4[i])
-            phase_error_acc += error * kp
-            phase_error_accs[i] = phase_error_acc
-            samples[i] = 0.3
-        if phase_error_acc > 0.25:
-            phase_error_acc -= 0.25
-            phase -= 1
-            corrected = True
-        elif phase_error_acc < -0.25:
-            phase_error_acc += 0.25
-            phase += 1
-            corrected = True
-        else:
-            corrected = False
+        print(f"========= FRAME {i} =========")
 
-    # Bit detector
-    bits = []
-    for i, sample in enumerate(samples):
-        if sample:
-            bits.append(detect[i] > 0)
+        # Recover symbol timing (Gardner Loop)
+        detect = demod[match_location:] - cfo
+        detect_delay_2 = sig.lfilter([0, 0, 1], [1], detect)
+        detect_delay_4 = sig.lfilter([0, 0, 0, 0, 1], [1], detect)
 
-    # Synchronize frame with access address
-    aa_start = 0
-    for i in range(len(samples)):
-        bit_array = bits[i : i + 32]
-        num = bits_to_int(bit_array)
-        if num == access_addr:
-            aa_start = i
-            break
+        kp = 0.125
+        phase = 0
+        phase_error_acc = 0
+        phase_error_accs = np.zeros_like(detect)
+        samples = np.zeros_like(detect)
+        corrected = False
+        for i, _ in enumerate(detect):
+            if i % 4 == phase % 4 and not corrected:
+                error = detect_delay_2[i] * (detect[i] - detect_delay_4[i])
+                phase_error_acc += error * kp
+                phase_error_accs[i] = phase_error_acc
+                samples[i] = 0.3
+            if phase_error_acc > 0.25:
+                phase_error_acc -= 0.25
+                phase -= 1
+                corrected = True
+            elif phase_error_acc < -0.25:
+                phase_error_acc += 0.25
+                phase += 1
+                corrected = True
+            else:
+                corrected = False
 
-    # Obtain PDU & CRC
-    pdu_start = aa_start + 32
-    dewhiten_out = dewhiten(bits[pdu_start:], ch_idx)
+        # Bit detector
+        bits = []
+        for i, sample in enumerate(samples):
+            if sample:
+                bits.append(detect[i] > 0)
 
-    # PDU header (Advertising Physical Channel)
-    header = dewhiten_out[0:16]
-    pdu_type = bits_to_int(header[0:4])
-    rfu = bits_to_int(header[4:5])
-    chsel = bits_to_int(header[5:6])
-    txadd = bits_to_int(header[6:7])
-    rxadd = bits_to_int(header[7:8])
-    print(f"PDU Type: {pdu_type}")
-    print(f"RFU: {rfu}")
-    print(f"CH sel: {chsel}")
-    print(f"TX Add: {txadd}")
-    print(f"Rx Add: {rxadd}")
-    pdu_length = bits_to_int(header[8:16])
-    pdu = dewhiten_out[0 : (pdu_length + 2) * 8]
+        # Synchronize frame with access address
+        aa_start = 0
+        for i in range(len(samples)):
+            bit_array = bits[i : i + 32]
+            num = bits_to_int(bit_array)
+            if num == access_addr:
+                aa_start = i
+                break
 
-    # CRC
-    crc = bits_to_int(
-        dewhiten_out[(pdu_length + 2) * 8 : (pdu_length + 2) * 8 + 24]
-    )
-    calculated_crc = calculate_crc(pdu)
-    print(f"Received CRC: {hex(crc)}")
-    print(f"Calculated CRC: {hex(bits_to_int(calculated_crc))}")
+        # Obtain PDU & CRC
+        pdu_start = aa_start + 32
+        dewhiten_out = dewhiten(bits[pdu_start:], ch_idx)
 
-    # ==========================================================================
-    # LINK LAYER CONTROL (MCU)
-    # ==========================================================================
+        # PDU header (Advertising Physical Channel)
+        header = dewhiten_out[0:16]
+        pdu_type = bits_to_int(header[0:4])
+        rfu = bits_to_int(header[4:5])
+        chsel = bits_to_int(header[5:6])
+        txadd = bits_to_int(header[6:7])
+        rxadd = bits_to_int(header[7:8])
+        print(f"PDU Type: {pdu_type}")
+        print(f"RFU: {rfu}")
+        print(f"CH sel: {chsel}")
+        print(f"TX Add: {txadd}")
+        print(f"Rx Add: {rxadd}")
+        pdu_length = bits_to_int(header[8:16])
+        pdu = dewhiten_out[0 : (pdu_length + 2) * 8]
 
-    # Payload (PDU Type: ADV_IND)
-    payload = pdu[16:]
-    adv_a = bits_to_int(payload[0 : 6 * 8])
-    adv_data = bits_to_bytes(payload[6 * 8 :])
-    print(f"AdvA: {hex(adv_a)}")
+        # CRC
+        crc = bits_to_int(
+            dewhiten_out[(pdu_length + 2) * 8 : (pdu_length + 2) * 8 + 24]
+        )
+        calculated_crc = calculate_crc(pdu)
+        print(f"Received CRC: {hex(crc)}")
+        print(f"Calculated CRC: {hex(bits_to_int(calculated_crc))}")
 
-    # Advertising data
-    print(f"AdvData: ({len(adv_data)} bytes)")
-    ad_struct_start = 0
-    while ad_struct_start < len(adv_data):
-        data_length = adv_data[ad_struct_start]
-        ad_type = adv_data[ad_struct_start + 1]
-        if ad_type == 9:
-            ad_data = adv_data[
-                ad_struct_start + 2 : ad_struct_start + 2 + (data_length - 1)
-            ]
-            print(f"Complete Local Name: {bytes(ad_data).decode()}")
-        ad_struct_start += data_length + 1
+        # ==========================================================================
+        # LINK LAYER CONTROL (MCU)
+        # ==========================================================================
+
+        if pdu_type != 0 and pdu_type != 2 and pdu_type != 6:
+            continue
+
+        # Payload (PDU Type: ADV_IND, ADV_NONCONN_IND, ADV_SCAN_IND)
+        payload = pdu[16:]
+        adv_a = bits_to_int(payload[0 : 6 * 8])
+        adv_data = bits_to_bytes(payload[6 * 8 :])
+        print(f"AdvA: {hex(adv_a)}")
+
+        # Advertising data
+        print(f"AdvData: ({len(adv_data)} bytes)")
+        ad_struct_start = 0
+        while ad_struct_start < len(adv_data):
+            data_length = adv_data[ad_struct_start]
+            ad_type = adv_data[ad_struct_start + 1]
+            if ad_type == 9:
+                ad_data = adv_data[
+                    ad_struct_start
+                    + 2 : ad_struct_start
+                    + 2
+                    + (data_length - 1)
+                ]
+                print(f"Complete Local Name: {bytes(ad_data).decode()}")
+            ad_struct_start += data_length + 1
 
     # ==========================================================================
     # PLOTTING
@@ -373,7 +393,7 @@ def main() -> None:
     axs["A"].yaxis.set_major_formatter(ScalarFormatter(useMathText=True))
     axs["A"].set_xlabel("Frequency (Hz)")
     axs["A"].set_ylabel("Amplitude (dB)")
-    axs["A"].set_title(f"Input I/Q FFT (Fs = {fs_in / 1e6} MSPS)")
+    axs["A"].set_title(f"Input spectrum (Fs = {fs_in / 1e6} MSPS)")
     axs["A"].set_ylim(-150, -80)
     axs["A"].set_xticks(np.arange(2400e6, 2482e6, 2e6))
     axs["A"].set_xlim(2401e6, 2481e6)
@@ -400,7 +420,7 @@ def main() -> None:
     axs["B"].set_xlabel("Frequency (Hz)")
     axs["B"].set_ylabel("Amplitude (dB)")
     axs["B"].set_title(
-        f"Input I/Q FFT (Fc = {lo_f / 1e6} MHz, Fs = {fs_in / 1e6} MSPS, 20 MSPS, 4 MSPS)"
+        f"Channel spectrum (Fc = {lo_f / 1e6} MHz, Fs = {fs_in / 1e6} MSPS, 20 MSPS, 4 MSPS)"
     )
     axs["B"].set_ylim(-150, -80)
     axs["B"].set_xticks(np.arange(-2e6, 2e6, 500e3))
@@ -416,7 +436,7 @@ def main() -> None:
     axs["C"].grid()
 
     # Demod plot
-    axs["D"].set_title("Demodulated plot")
+    axs["D"].set_title("Frame detection")
     axs["D"].plot(np.arange(len(demod)), demod, label="Demodulated signal")
     axs["D"].plot(
         np.arange(len(aa_match)), aa_match, label="Access Address Match"
@@ -430,18 +450,19 @@ def main() -> None:
     axs["D"].legend()
 
     # Frame plot
-    axs["E"].set_title("Frame plot")
-    axs["E"].plot(np.arange(len(detect)), detect, label="Detect")
-    axs["E"].plot(
-        np.arange(len(phase_error_accs)),
-        phase_error_accs,
-        label="Phase accumulator",
-    )
-    axs["E"].stem(np.arange(len(samples)), samples, label="samples")
-    axs["E"].set_ylim(-0.5, 0.5)
-    axs["E"].set_xlim(0, (8 + 32 + 16 + pdu_length * 8) * 4)
-    axs["E"].grid()
-    axs["E"].legend()
+    if len(match_locations) > 0:
+        axs["E"].set_title("Bit Detection")
+        axs["E"].plot(np.arange(len(detect)), detect, label="Demodulated signal")
+        axs["E"].plot(
+            np.arange(len(phase_error_accs)),
+            phase_error_accs,
+            label="Phase accumulator",
+        )
+        axs["E"].stem(np.arange(len(samples)), samples, label="Samples")
+        axs["E"].set_ylim(-0.5, 0.5)
+        axs["E"].set_xlim(0, (8 + 32 + 16 + pdu_length * 8) * 4)
+        axs["E"].grid()
+        axs["E"].legend()
 
     # Plot
     plt.show()
