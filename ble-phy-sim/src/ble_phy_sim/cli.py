@@ -98,8 +98,8 @@ def cic_decimator(
 
 
 def gfsk_demodulator(iq_in: NDArray[np.complex64]) -> NDArray[np.float64]:
-    iq_delay = iq_in[1:]
-    delay_conj_mult = np.conj(iq_in[:-1]) * iq_delay
+    iq_delay = sig.lfilter([0, 1], [1], iq_in.astype(np.complex128))
+    delay_conj_mult = iq_in * np.conj(iq_delay)
     return np.atan2(delay_conj_mult.imag, delay_conj_mult.real)
 
 
@@ -125,24 +125,39 @@ def main() -> None:
 
     # Baseband processing: decimate to 4 MSPS. Passband @ 1 MHz
     decimated_iq = cic_decimator(iq_max2830, 4, 5, 2, 0.25, 31)
+    decimated_iq = decimated_iq[0 : round(len(decimated_iq) / 4) * 4]
 
     # Demodulate
     demod = gfsk_demodulator(decimated_iq).clip(-0.3 * np.pi, 0.3 * np.pi)
 
-    # 1. Detect CFO from preamble
+    # I/Q magnitude
+    magnitude = np.abs(decimated_iq)
+    magnitude_avg = sig.lfilter(np.ones(32 * 4) / 32 / 4, [1], magnitude)
+    magnitude_ok = 20 * np.log10(magnitude_avg) > -80
+
+    # Detect CFO from preamble
     cfo_est_len = 6 * 4
     cfo = sig.lfilter(np.ones(cfo_est_len) / cfo_est_len, [1], demod)
+    delay = np.zeros(32 * 4)
+    delay[-1] = 1.0
+    cfo = sig.lfilter(delay, [1], cfo)
 
-    # 2. Access address correlation
+    # Access address correlation
     access_addr = 0x8E89BED6
     aa_bits = np.array([int(bit) for bit in f"{access_addr:032b}"])
     aa_bits = aa_bits * 2 - 1
-    aa_corr = sig.lfilter(aa_bits.repeat(4), [1], demod) / 32 / 4 > 0.25
+    aa_corr = sig.lfilter(aa_bits.repeat(4), [1], demod)
+    aa_avg = sig.lfilter(np.ones_like(aa_bits.repeat(4)), [1], demod) / 32 / 4
+    aa_corr_dc_free = aa_corr - aa_avg * np.sum(aa_bits)
 
-    # 3. Recover symbol timing (Gardner Loop)
-    # 4. Bit detector
-    # 5. Synchronize frame with access address
-    # 6. Obtain PDU & CRC
+    ## Matched signal
+    aa_match = (aa_corr_dc_free > 32) * magnitude_ok
+    cfo_match = cfo * aa_match
+
+    # Recover symbol timing (Gardner Loop)
+    # Bit detector
+    # Synchronize frame with access address
+    # Obtain PDU & CRC
 
     # FFT
     input_fft = np.fft.fft(iq) / len(iq)
@@ -213,7 +228,9 @@ def main() -> None:
     # Demod plot
     axs["D"].set_title("Demodulated plot")
     axs["D"].plot(np.arange(len(demod)), demod)
-    axs["D"].plot(np.arange(len(aa_corr)), aa_corr)
+    axs["D"].plot(np.arange(len(aa_match)), aa_match)
+    axs["D"].plot(np.arange(len(cfo_match)), cfo_match)
+    axs["D"].plot(np.arange(len(magnitude_ok)), magnitude_ok)
     axs["D"].set_ylim(-0.5, 0.5)
     axs["D"].grid()
 
