@@ -1,0 +1,47 @@
+module Integrator #(
+    param Width: u32 = 32,
+) (
+    i_d  : input  logic<Width>,
+    o_d  : output logic<Width>,
+    i_clk: input  clock       ,
+    i_rst: input  reset       ,
+) {
+    always_ff {
+        o_d = o_d + i_d;
+    }
+}
+
+module Comb #(
+    param Width: u32 = 32,
+    param N    : u32 = 2 ,
+) (
+    i_d  : input  logic<Width>,
+    o_d  : output logic<Width>,
+    i_clk: input  clock       ,
+    i_rst: input  reset       ,
+) {
+    var delayed_in;
+
+    inst delay: $std::delay #(
+        DELAY: N    ,
+        WIDTH: Width,
+    ) (
+        i_d  : i_d       ,
+        o_d  : delayed_in,
+        i_clk: i_clk     ,
+        i_rst: i_rst     ,
+    );
+
+    always_ff {
+        o_d = i_d + delayed_in;
+    }
+}
+
+module Cic #(
+    param Width: u32 = 32,
+) (
+    i_d       : input        logic<Width>,
+    o_d       : output       logic<Width>,
+    i_clk_high: input  'high clock       ,
+    i_clk_low : input  'low  clock       ,
+) {}
