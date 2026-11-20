@@ -4,11 +4,11 @@ module Cic #(
     param N     : u32 = 2 ,
     param R     : u32 = 5 ,
 ) (
-    i_d      : input     signed logic<Width>,
-    o_d      : output    signed logic<Width>,
-    o_clk_low: output '_ clock              ,
-    i_clk    : input  '_ clock              ,
-    i_rst    : input     reset              ,
+    i_d     : input  signed logic<Width>,
+    o_d     : output signed logic<Width>,
+    o_clk_en: output logic              ,
+    i_clk   : input  clock              ,
+    i_rst   : input  reset              ,
 ) {
     const Expansion    : i32 = Stages * $clog2(N * R);
     const ExpandedWidth: i32 = Width + Expansion;
@@ -29,9 +29,9 @@ module Cic #(
         );
     }
 
-    // Down sample
-    var o_clk_en;
+    let o_integrator = integrator_d[Stages];
 
+    // Down sample
     inst counter: $std::counter #(
         WIDTH    : $clog2(R),
         MAX_COUNT: R - 1,
@@ -48,28 +48,29 @@ module Cic #(
         o_count_next : _       ,
     );
 
-    var down_sampled: signed logic<ExpandedWidth>;
+    var o_down_sampled: signed logic<ExpandedWidth>;
 
-    assign o_clk_low = i_clk & o_clk_en;
-
-    always_ff (o_clk_low) {
-        down_sampled = integrator_d[Stages];
+    always_ff {
+        if o_clk_en {
+            o_down_sampled = o_integrator;
+        }
     }
 
     // Comb
     var comb_d: signed logic<ExpandedWidth> [Stages + 1];
 
-    assign comb_d[0] = down_sampled;
+    assign comb_d[0] = o_down_sampled;
 
     for i in 1..Stages + 1 :combs {
         inst comb: Comb #(
             Width: ExpandedWidth,
             N    : N            ,
         ) (
-            i_d  : comb_d[i - 1],
-            o_d  : comb_d[i]    ,
-            i_clk: o_clk_low    ,
-            i_rst: i_rst        ,
+            i_d     : comb_d[i - 1],
+            o_d     : comb_d[i]    ,
+            i_clk_en: o_clk_en     ,
+            i_clk                  ,
+            i_rst                  ,
         );
     }
 
@@ -88,10 +89,11 @@ module Cic #(
             32'b11111111100000100110111010010111,
         },
     ) (
-        i_d  : o_comb,
-        o_d  : o_d   ,
-        i_clk        ,
-        i_rst        ,
+        i_d     : o_comb  ,
+        i_clk_en: o_clk_en,
+        o_d               ,
+        i_clk             ,
+        i_rst             ,
     );
 }
 
@@ -100,10 +102,11 @@ module Fir #(
     param N    : u32                     = 2      ,
     param Bs   : signed logic<Width> [N] = '{1, 1},
 ) (
-    i_d  : input  signed logic<Width>,
-    o_d  : output signed logic<Width>,
-    i_clk: input  clock              ,
-    i_rst: input  reset              ,
+    i_d     : input  signed logic<Width>,
+    o_d     : output signed logic<Width>,
+    i_clk   : input  clock              ,
+    i_clk_en: input  logic              ,
+    i_rst   : input  reset              ,
 ) {
     function Sum (
         xs: input signed logic<Width> [N],
@@ -127,11 +130,13 @@ module Fir #(
     var tap_d: signed logic<ExpandedWidth> [N - 1];
 
     always_ff {
-        for i in 0..N - 1 {
-            if i == 0 {
-                tap_d[i] = i_d as ExpandedWidth;
-            } else {
-                tap_d[i] = tap_d[i - 1];
+        if i_clk_en {
+            for i in 0..N - 1 {
+                if i == 0 {
+                    tap_d[i] = i_d as ExpandedWidth;
+                } else {
+                    tap_d[i] = tap_d[i - 1];
+                }
             }
         }
     }
@@ -173,10 +178,11 @@ module Comb #(
     param Width: u32 = 32,
     param N    : u32 = 2 ,
 ) (
-    i_d  : input  signed logic<Width>,
-    o_d  : output signed logic<Width>,
-    i_clk: input  clock              ,
-    i_rst: input  reset              ,
+    i_d     : input  signed logic<Width>,
+    o_d     : output signed logic<Width>,
+    i_clk   : input  clock              ,
+    i_clk_en: input  logic              ,
+    i_rst   : input  reset              ,
 ) {
     var delayed_in: signed logic<Width>;
 
@@ -191,7 +197,9 @@ module Comb #(
     );
 
     always_ff {
-        o_d = i_d + delayed_in;
+        if i_clk_en {
+            o_d = i_d + delayed_in;
+        }
     }
 }
 
@@ -200,24 +208,24 @@ module test_cic {
     inst clk: $tb::clock_gen;
     inst rst: $tb::reset_gen ( clk );
 
-    var i_d      : signed logic<32>;
-    var o_d      : signed logic<32>;
-    var o_clk_low: logic           ;
+    var i_d     : signed logic<32>;
+    var o_d     : signed logic<32>;
+    var o_clk_en: logic           ;
 
     inst dut: Cic #(
         Width: 32,
     ) (
-        i_d           ,
-        o_d           ,
-        o_clk_low     ,
-        i_clk    : clk,
-        i_rst    : rst,
+        i_d          ,
+        o_d          ,
+        o_clk_en     ,
+        i_clk   : clk,
+        i_rst   : rst,
     );
 
     inst data_gen: $comp::generator #(
-        Width     : 32     ,
-        Freq      : 100000 ,
-        SampleRate: 4000000,
+        Width     : 32      ,
+        Freq      : 100000  ,
+        SampleRate: 20000000,
     ) (
         clk      ,
         rst      ,
