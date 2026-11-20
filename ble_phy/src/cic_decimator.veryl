@@ -65,19 +65,30 @@ module Cic #(
         );
     }
 
-    let o_comb: signed logic<Width> = (comb_d[Stages] >> Expansion) as Width;
+    let o_comb: signed logic<Width> = (comb_d[Stages] >>> Expansion) as Width;
 
     // Compensation Filter
     inst compensation_filter: Fir #(
-        Width: Width,
-        N    : 11   ,
-        Bs   : '{
-            32'b11111111100000100110111010010111, 32'b00000111000111101100100010100111,
-            32'b11111101100111001001110110011010, 32'b11001110110101001010011110011111,
-            32'b00011000101010101011010001011111, 32'b01111111111111111111111111111111,
-            32'b00011000101010101011010001011111, 32'b11001110110101001010011110011111,
-            32'b11111101100111001001110110011010, 32'b00000111000111101100100010100111,
-            32'b11111111100000100110111010010111,
+        Width    : Width,
+        Fractions: 27   ,
+        N        : 31   ,
+        Bs       : '{
+            32'b00000000000000111110100011010111, 32'b11111111110000100101110110001110,
+            32'b00000000000011010110110100000010, 32'b00000000011010010101101111111101,
+            32'b11111111111101110110111111111010, 32'b11111111010000111000100011110110,
+            32'b11111111001111101110110011000011, 32'b00000010011000011011000111100110,
+            32'b00000010100110100011111111001011, 32'b11110111101011010101111011101000,
+            32'b11111101000010001001110010100000, 32'b00010101001010001000101011110000,
+            32'b11111100101111101110001001100111, 32'b11010110100011011110101011100010,
+            32'b00010000010011111011011010110011, 32'b01001101010100110010010100111111,
+            32'b00010000010011111011011010110011, 32'b11010110100011011110101011100010,
+            32'b11111100101111101110001001100111, 32'b00010101001010001000101011110000,
+            32'b11111101000010001001110010100000, 32'b11110111101011010101111011101000,
+            32'b00000010100110100011111111001011, 32'b00000010011000011011000111100110,
+            32'b11111111001111101110110011000011, 32'b11111111010000111000100011110110,
+            32'b11111111111101110110111111111010, 32'b00000000011010010101101111111101,
+            32'b00000000000011010110110100000010, 32'b11111111110000100101110110001110,
+            32'b00000000000000111110100011010111,
         },
     ) (
         i_d     : o_comb  ,
@@ -89,9 +100,10 @@ module Cic #(
 }
 
 module Fir #(
-    param Width: u32                     = 32     ,
-    param N    : u32                     = 2      ,
-    param Bs   : signed logic<Width> [N] = '{1, 1},
+    param Width    : u32                     = 32     ,
+    param Fractions: u32                     = 27     ,
+    param N        : u32                     = 2      ,
+    param Bs       : signed logic<Width> [N] = '{1, 1},
 ) (
     i_d     : input  signed logic<Width>,
     o_d     : output signed logic<Width>,
@@ -99,32 +111,16 @@ module Fir #(
     i_clk_en: input  logic              ,
     i_rst   : input  reset              ,
 ) {
-    function Sum (
-        xs: input signed logic<Width> [N],
-    ) -> u32 {
-        var sum: u32;
-
-        for i in 0..N {
-            if xs[i][msb] == 0 {
-                sum = sum + xs[i] as u32;
-            } else {
-                sum = sum + (~xs[i] + 1) as u32;
-            }
-        }
-
-        return sum;
-    }
-
-    const Expansion    : u32 = $clog2(Sum(Bs)) as u32;
+    const Expansion    : u32 = Width + $clog2(N);
     const ExpandedWidth: u32 = Width + Expansion;
 
-    var tap_d: signed logic<ExpandedWidth> [N - 1];
+    var tap_d: signed logic<Width> [N - 1];
 
     always_ff {
         if i_clk_en {
             for i in 0..N - 1 {
                 if i == 0 {
-                    tap_d[i] = i_d as ExpandedWidth;
+                    tap_d[i] = i_d;
                 } else {
                     tap_d[i] = tap_d[i - 1];
                 }
@@ -132,24 +128,22 @@ module Fir #(
         }
     }
 
-    var scaled_d: signed logic<ExpandedWidth> [N]    ;
-    var sums    : signed logic<ExpandedWidth> [N - 1];
+    var scaled_d: signed logic<ExpandedWidth> [N];
+    var sums    : signed logic<ExpandedWidth> [N];
 
     always_comb {
         for i in 0..N {
             if i == 0 {
-                scaled_d[i] = i_d as ExpandedWidth * Bs[i] as ExpandedWidth;
+                scaled_d[i] = (i_d as ExpandedWidth) * (Bs[i] as ExpandedWidth);
+                sums[i]     = scaled_d[i];
             } else {
-                scaled_d[i] = tap_d[i - 1] * Bs[i] as ExpandedWidth;
+                scaled_d[i] = (tap_d[i - 1] as ExpandedWidth) * (Bs[i] as ExpandedWidth);
+                sums[i]     = sums[i - 1] + scaled_d[i];
             }
-        }
-
-        for i in 0..N - 1 {
-            sums[i] = scaled_d[i] + scaled_d[i + 1];
         }
     }
 
-    assign o_d = (sums[N - 2] >> Expansion) as Width;
+    assign o_d = (sums[N - 1] >>> Fractions) as Width;
 }
 
 module Integrator #(
@@ -222,13 +216,13 @@ module test_cic {
 
     initial {
         rst.assert();
-        for _ in 0..1000 {
+        for _ in 0..2000 {
             clk.next();
             clk.next();
             clk.next();
             clk.next();
             clk.next();
-            $display("o_comb = %d", dut.o_comb);
+            $display("o_d = %d", dut.o_d);
         }
         $finish();
     }

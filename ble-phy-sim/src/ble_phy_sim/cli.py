@@ -95,15 +95,19 @@ def cic_decimator(
     f = np.concatenate([fp, fs])
     g = np.concatenate([gp, gs])
     fir = sig.firwin2(taps, f, g, fs=1.0)
-
     print(f"FIR coefficients = {fir}")
 
-    print(f"Binary coefficients = {fir}")
+    # Calculate FIR coefficients for HDL
+    expansion = stages * int(np.ceil(np.log2(r * n)))
+    scale_correction = (2**expansion) / dc_gain
+    fir_hw = fir * scale_correction * 0.9  # Keep output from clipping from ripple
+    fractions = 27
     width = 32
+    print(f"FIR coefficients = ")
     print("'{")
-    for b in fir:
-        b = b * (2 ** (width - 1) - 1) / max(abs(fir))
-        print(f"32'b{to_twos_complement(int(b), width)},")
+    for b in fir_hw:
+        val = int(round(b * (2**fractions)))
+        print(f"32'b{to_twos_complement(val, width)},")
     print("}")
 
     iq_out = sig.lfilter(fir, [1.0], iq_out)
@@ -221,7 +225,7 @@ def main() -> None:
     # ==========================================================================
 
     # Decimate to 4 MSPS. Passband @ 1 MHz
-    decimated_iq = cic_decimator(iq_max2830, 4, 5, 2, 0.25, 11)
+    decimated_iq = cic_decimator(iq_max2830, 4, 5, 2, 0.25, 31)
     decimated_iq = decimated_iq[0 : round(len(decimated_iq) / 4) * 4]
 
     # Demodulate
