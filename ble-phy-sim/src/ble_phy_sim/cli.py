@@ -53,6 +53,10 @@ def max2830_demod(
     return iq_filtered[::r].astype(np.complex64)
 
 
+def to_twos_complement(num: int, bits: int):
+    return format(num & ((1 << bits) - 1), f"0{bits}b")
+
+
 def cic_decimator(
     iq_in: NDArray[np.complex64],
     stages: int,
@@ -91,6 +95,16 @@ def cic_decimator(
     f = np.concatenate([fp, fs])
     g = np.concatenate([gp, gs])
     fir = sig.firwin2(taps, f, g, fs=1.0)
+
+    print(f"FIR coefficients = {fir}")
+
+    print(f"Binary coefficients = {fir}")
+    width = 32
+    print("'{")
+    for b in fir:
+        b = b * (2 ** (width - 1) - 1) / max(abs(fir))
+        print(f"32'b{to_twos_complement(int(b), width)},")
+    print("}")
 
     iq_out = sig.lfilter(fir, [1.0], iq_out)
 
@@ -207,7 +221,7 @@ def main() -> None:
     # ==========================================================================
 
     # Decimate to 4 MSPS. Passband @ 1 MHz
-    decimated_iq = cic_decimator(iq_max2830, 4, 5, 2, 0.25, 31)
+    decimated_iq = cic_decimator(iq_max2830, 4, 5, 2, 0.25, 11)
     decimated_iq = decimated_iq[0 : round(len(decimated_iq) / 4) * 4]
 
     # Demodulate
@@ -452,7 +466,9 @@ def main() -> None:
     # Frame plot
     if len(match_locations) > 0:
         axs["E"].set_title("Bit Detection")
-        axs["E"].plot(np.arange(len(detect)), detect, label="Demodulated signal")
+        axs["E"].plot(
+            np.arange(len(detect)), detect, label="Demodulated signal"
+        )
         axs["E"].plot(
             np.arange(len(phase_error_accs)),
             phase_error_accs,
