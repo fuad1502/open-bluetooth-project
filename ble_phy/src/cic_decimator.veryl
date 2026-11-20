@@ -32,27 +32,18 @@ module Cic #(
     let o_integrator = integrator_d[Stages];
 
     // Down sample
-    inst counter: $std::counter #(
-        WIDTH    : $clog2(R),
-        MAX_COUNT: R - 1,
-    ) (
-        i_clk        : i_clk   ,
-        i_rst        : i_rst   ,
-        i_up         : 1       ,
-        o_wrap_around: o_clk_en,
-        i_clear      : 0       ,
-        i_set        : 0       ,
-        i_set_value  : 0       ,
-        i_down       : 0       ,
-        o_count      : _       ,
-        o_count_next : _       ,
-    );
-
-    var o_down_sampled: signed logic<ExpandedWidth>;
+    const CounterWidth  : u32                         = $clog2(R);
+    var   counter       : logic       <CounterWidth> ;
+    var   o_down_sampled: signed logic<ExpandedWidth>;
 
     always_ff {
-        if o_clk_en {
+        if counter == (R - 1) as CounterWidth {
             o_down_sampled = o_integrator;
+            o_clk_en       = 1;
+            counter        = 0;
+        } else {
+            o_clk_en =  0;
+            counter  += 1;
         }
     }
 
@@ -184,21 +175,18 @@ module Comb #(
     i_clk_en: input  logic              ,
     i_rst   : input  reset              ,
 ) {
-    var delayed_in: signed logic<Width>;
-
-    inst delay: $std::delay #(
-        DELAY: N    ,
-        WIDTH: Width,
-    ) (
-        i_d  : i_d       ,
-        o_d  : delayed_in,
-        i_clk: i_clk     ,
-        i_rst: i_rst     ,
-    );
+    var delayed: signed logic<Width> [N];
 
     always_ff {
         if i_clk_en {
-            o_d = i_d + delayed_in;
+            o_d = i_d + delayed[N - 1];
+            for i in 0..N {
+                if i == 0 {
+                    delayed[i] = i_d;
+                } else {
+                    delayed[i] = delayed[i - 1];
+                }
+            }
         }
     }
 }
@@ -236,6 +224,7 @@ module test_cic {
         rst.assert();
         for _ in 0..1000 {
             clk.next();
+            $display("o_comb = %d", dut.o_comb);
         }
         $finish();
     }
