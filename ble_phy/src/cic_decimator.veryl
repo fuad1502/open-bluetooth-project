@@ -1,23 +1,25 @@
 module Cic #(
-    param Width : u32 = 32,
-    param Stages: u32 = 4 ,
-    param N     : u32 = 2 ,
-    param R     : u32 = 5 ,
+    param Stages     : u32 = 4                                  ,
+    param N          : u32 = 2                                  ,
+    param R          : u32 = 5                                  ,
+    param InputWidth : u32 = 32                                 ,
+    param OutputWidth: i32 = InputWidth + Stages * $clog2(N * R),
 ) (
-    i_d      : input     logic<Width>,
-    o_d      : output    logic<Width>,
-    o_clk_low: output '_ clock       ,
-    i_clk    : input  '_ clock       ,
-    i_rst    : input     reset       ,
+    i_d      : input     logic<InputWidth> ,
+    o_d      : output    logic<OutputWidth>,
+    o_clk_low: output '_ clock             ,
+    i_clk    : input  '_ clock             ,
+    i_rst    : input     reset             ,
 ) {
+
     // Integrator
-    var integrator_d: logic<Width> [Stages + 1];
+    var integrator_d: logic<OutputWidth> [Stages + 1];
 
     assign integrator_d[0] = i_d;
 
     for i in 1..Stages + 1 :integrators {
         inst integrator: Integrator #(
-            Width: Width,
+            Width: OutputWidth,
         ) (
             i_d  : integrator_d[i - 1],
             o_d  : integrator_d[i]    ,
@@ -30,8 +32,8 @@ module Cic #(
     var o_clk_en;
 
     inst counter: $std::counter #(
-        WIDTH    : Width,
-        MAX_COUNT: R    ,
+        WIDTH    : $clog2(R),
+        MAX_COUNT: R        ,
     ) (
         i_clk        : i_clk   ,
         i_rst        : i_rst   ,
@@ -54,14 +56,14 @@ module Cic #(
     }
 
     // Comb
-    var comb_d: logic<Width> [Stages + 1];
+    var comb_d: logic<OutputWidth> [Stages + 1];
 
     assign comb_d[0] = down_sampled;
 
     for i in 1..Stages + 1 :combs {
         inst comb: Comb #(
-            Width: Width,
-            N    : N    ,
+            Width: OutputWidth,
+            N    : N          ,
         ) (
             i_d  : comb_d[i - 1],
             o_d  : comb_d[i]    ,
