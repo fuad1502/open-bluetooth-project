@@ -1,25 +1,26 @@
 module Cic #(
-    param Stages     : u32 = 4                                  ,
-    param N          : u32 = 2                                  ,
-    param R          : u32 = 5                                  ,
-    param InputWidth : u32 = 32                                 ,
-    param OutputWidth: i32 = InputWidth + Stages * $clog2(N * R),
+    param Width : u32 = 32,
+    param Stages: u32 = 4 ,
+    param N     : u32 = 2 ,
+    param R     : u32 = 5 ,
 ) (
-    i_d      : input     logic<InputWidth> ,
-    o_d      : output    logic<OutputWidth>,
-    o_clk_low: output '_ clock             ,
-    i_clk    : input  '_ clock             ,
-    i_rst    : input     reset             ,
+    i_d      : input     logic<Width>,
+    o_d      : output    logic<Width>,
+    o_clk_low: output '_ clock       ,
+    i_clk    : input  '_ clock       ,
+    i_rst    : input     reset       ,
 ) {
+    const Expansion    : i32 = Stages * $clog2(N * R);
+    const ExpandedWidth: i32 = Width + Expansion;
 
     // Integrator
-    var integrator_d: logic<OutputWidth> [Stages + 1];
+    var integrator_d: logic<ExpandedWidth> [Stages + 1];
 
-    assign integrator_d[0] = i_d;
+    assign integrator_d[0] = i_d as ExpandedWidth;
 
     for i in 1..Stages + 1 :integrators {
         inst integrator: Integrator #(
-            Width: OutputWidth,
+            Width: ExpandedWidth,
         ) (
             i_d  : integrator_d[i - 1],
             o_d  : integrator_d[i]    ,
@@ -56,14 +57,14 @@ module Cic #(
     }
 
     // Comb
-    var comb_d: logic<OutputWidth> [Stages + 1];
+    var comb_d: logic<ExpandedWidth> [Stages + 1];
 
     assign comb_d[0] = down_sampled;
 
     for i in 1..Stages + 1 :combs {
         inst comb: Comb #(
-            Width: OutputWidth,
-            N    : N          ,
+            Width: ExpandedWidth,
+            N    : N            ,
         ) (
             i_d  : comb_d[i - 1],
             o_d  : comb_d[i]    ,
@@ -72,7 +73,80 @@ module Cic #(
         );
     }
 
-    assign o_d = comb_d[Stages];
+    let o_comb: logic<Width> = (comb_d[Stages] >> Expansion) as Width;
+
+    // Compensation Filter
+    inst compensation_filter: Fir #(
+        Width: Width  ,
+        N    : 2      ,
+        Bs   : '{1, 1},
+    ) (
+        i_d  : o_comb,
+        o_d  : o_d   ,
+        i_clk        ,
+        i_rst        ,
+    );
+}
+
+module Fir #(
+    param Width: u32              = 32     ,
+    param N    : u32              = 2      ,
+    param Bs   : logic<Width> [N] = '{1, 1},
+) (
+    i_d  : input  logic<Width>,
+    o_d  : output logic<Width>,
+    i_clk: input  clock       ,
+    i_rst: input  reset       ,
+) {
+    function Sum (
+        xs: input logic<Width> [N],
+    ) -> u32 {
+        var sum: u32;
+
+        for i in 0..N {
+            if xs[i][msb] == 0 {
+                sum = sum + xs[i] as u32;
+            } else {
+                sum = sum + (~xs[i] + 1) as u32;
+            }
+        }
+
+        return sum;
+    }
+
+    const Expansion    : u32 = $clog2(Sum(Bs)) as u32;
+    const ExpandedWidth: u32 = Width + Expansion;
+
+    var tap_d: logic<ExpandedWidth> [N - 1];
+
+    always_ff {
+        for i in 0..N - 1 {
+            if i == 0 {
+                tap_d[i] = i_d as ExpandedWidth;
+            } else {
+                tap_d[i] = tap_d[i - 1];
+            }
+        }
+    }
+
+    var scaled_d: logic<ExpandedWidth> [N]    ;
+    var sums    : logic<ExpandedWidth> [N - 1];
+
+    always_comb {
+        for i in 0..N {
+            if i == 0 {
+                scaled_d[i] = i_d as ExpandedWidth * Bs[i] as ExpandedWidth;
+            } else {
+                scaled_d[i] = tap_d[i - 1] * Bs[i] as ExpandedWidth;
+            }
+        }
+
+        for i in 0..N - 1 {
+            sums[i] = scaled_d[i] + scaled_d[i + 1];
+        }
+    }
+
+    assign o_d = (sums[N - 2] >> Expansion) as Width;
 }
 
 module Integrator #(
@@ -97,7 +171,7 @@ module Comb #(
     i_clk: input  clock       ,
     i_rst: input  reset       ,
 ) {
-    var delayed_in;
+    var delayed_in: logic<Width>;
 
     inst delay: $std::delay #(
         DELAY: N    ,
