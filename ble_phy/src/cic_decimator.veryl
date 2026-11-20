@@ -179,7 +179,7 @@ module Comb #(
 
     always_ff {
         if i_clk_en {
-            o_d = i_d + delayed[N - 1];
+            o_d = i_d - delayed[N - 1];
             for i in 0..N {
                 if i == 0 {
                     delayed[i] = i_d;
@@ -223,6 +223,10 @@ module test_cic {
     initial {
         rst.assert();
         for _ in 0..1000 {
+            clk.next();
+            clk.next();
+            clk.next();
+            clk.next();
             clk.next();
             $display("o_comb = %d", dut.o_comb);
         }
