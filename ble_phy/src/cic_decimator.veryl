@@ -4,17 +4,17 @@ module Cic #(
     param N     : u32 = 2 ,
     param R     : u32 = 5 ,
 ) (
-    i_d      : input     logic<Width>,
-    o_d      : output    logic<Width>,
-    o_clk_low: output '_ clock       ,
-    i_clk    : input  '_ clock       ,
-    i_rst    : input     reset       ,
+    i_d      : input     signed logic<Width>,
+    o_d      : output    signed logic<Width>,
+    o_clk_low: output '_ clock              ,
+    i_clk    : input  '_ clock              ,
+    i_rst    : input     reset              ,
 ) {
     const Expansion    : i32 = Stages * $clog2(N * R);
     const ExpandedWidth: i32 = Width + Expansion;
 
     // Integrator
-    var integrator_d: logic<ExpandedWidth> [Stages + 1];
+    var integrator_d: signed logic<ExpandedWidth> [Stages + 1];
 
     assign integrator_d[0] = i_d as ExpandedWidth;
 
@@ -34,7 +34,7 @@ module Cic #(
 
     inst counter: $std::counter #(
         WIDTH    : $clog2(R),
-        MAX_COUNT: R        ,
+        MAX_COUNT: R - 1,
     ) (
         i_clk        : i_clk   ,
         i_rst        : i_rst   ,
@@ -48,7 +48,7 @@ module Cic #(
         o_count_next : _       ,
     );
 
-    var down_sampled;
+    var down_sampled: signed logic<ExpandedWidth>;
 
     assign o_clk_low = i_clk & o_clk_en;
 
@@ -57,7 +57,7 @@ module Cic #(
     }
 
     // Comb
-    var comb_d: logic<ExpandedWidth> [Stages + 1];
+    var comb_d: signed logic<ExpandedWidth> [Stages + 1];
 
     assign comb_d[0] = down_sampled;
 
@@ -73,7 +73,7 @@ module Cic #(
         );
     }
 
-    let o_comb: logic<Width> = (comb_d[Stages] >> Expansion) as Width;
+    let o_comb: signed logic<Width> = (comb_d[Stages] >> Expansion) as Width;
 
     // Compensation Filter
     inst compensation_filter: Fir #(
@@ -96,17 +96,17 @@ module Cic #(
 }
 
 module Fir #(
-    param Width: u32              = 32     ,
-    param N    : u32              = 2      ,
-    param Bs   : logic<Width> [N] = '{1, 1},
+    param Width: u32                     = 32     ,
+    param N    : u32                     = 2      ,
+    param Bs   : signed logic<Width> [N] = '{1, 1},
 ) (
-    i_d  : input  logic<Width>,
-    o_d  : output logic<Width>,
-    i_clk: input  clock       ,
-    i_rst: input  reset       ,
+    i_d  : input  signed logic<Width>,
+    o_d  : output signed logic<Width>,
+    i_clk: input  clock              ,
+    i_rst: input  reset              ,
 ) {
     function Sum (
-        xs: input logic<Width> [N],
+        xs: input signed logic<Width> [N],
     ) -> u32 {
         var sum: u32;
 
@@ -124,7 +124,7 @@ module Fir #(
     const Expansion    : u32 = $clog2(Sum(Bs)) as u32;
     const ExpandedWidth: u32 = Width + Expansion;
 
-    var tap_d: logic<ExpandedWidth> [N - 1];
+    var tap_d: signed logic<ExpandedWidth> [N - 1];
 
     always_ff {
         for i in 0..N - 1 {
@@ -136,8 +136,8 @@ module Fir #(
         }
     }
 
-    var scaled_d: logic<ExpandedWidth> [N]    ;
-    var sums    : logic<ExpandedWidth> [N - 1];
+    var scaled_d: signed logic<ExpandedWidth> [N]    ;
+    var sums    : signed logic<ExpandedWidth> [N - 1];
 
     always_comb {
         for i in 0..N {
@@ -159,10 +159,10 @@ module Fir #(
 module Integrator #(
     param Width: u32 = 32,
 ) (
-    i_d  : input  logic<Width>,
-    o_d  : output logic<Width>,
-    i_clk: input  clock       ,
-    i_rst: input  reset       ,
+    i_d  : input  signed logic<Width>,
+    o_d  : output signed logic<Width>,
+    i_clk: input  clock              ,
+    i_rst: input  reset              ,
 ) {
     always_ff {
         o_d = o_d + i_d;
@@ -173,12 +173,12 @@ module Comb #(
     param Width: u32 = 32,
     param N    : u32 = 2 ,
 ) (
-    i_d  : input  logic<Width>,
-    o_d  : output logic<Width>,
-    i_clk: input  clock       ,
-    i_rst: input  reset       ,
+    i_d  : input  signed logic<Width>,
+    o_d  : output signed logic<Width>,
+    i_clk: input  clock              ,
+    i_rst: input  reset              ,
 ) {
-    var delayed_in: logic<Width>;
+    var delayed_in: signed logic<Width>;
 
     inst delay: $std::delay #(
         DELAY: N    ,
@@ -200,9 +200,9 @@ module test_cic {
     inst clk: $tb::clock_gen;
     inst rst: $tb::reset_gen ( clk );
 
-    var i_d      : logic<32>;
-    var o_d      : logic<32>;
-    var o_clk_low: logic    ;
+    var i_d      : signed logic<32>;
+    var o_d      : signed logic<32>;
+    var o_clk_low: logic           ;
 
     inst dut: Cic #(
         Width: 32,
@@ -214,13 +214,21 @@ module test_cic {
         i_rst    : rst,
     );
 
+    inst data_gen: $comp::generator #(
+        Width     : 32     ,
+        Freq      : 100000 ,
+        SampleRate: 4000000,
+    ) (
+        clk      ,
+        rst      ,
+        data: i_d,
+    );
+
     initial {
         rst.assert();
-        i_d = 'b101;
-        clk.next();
-        clk.next();
-        clk.next();
-        $assert(dut.integrator_d[1] == 'b1111);
+        for _ in 0..1000 {
+            clk.next();
+        }
         $finish();
     }
 }
