@@ -194,3 +194,33 @@ module Comb #(
         o_d = i_d + delayed_in;
     }
 }
+
+#[test(test_cic)]
+module test_cic {
+    inst clk: $tb::clock_gen;
+    inst rst: $tb::reset_gen ( clk );
+
+    var i_d      : logic<32>;
+    var o_d      : logic<32>;
+    var o_clk_low: logic    ;
+
+    inst dut: Cic #(
+        Width: 32,
+    ) (
+        i_d           ,
+        o_d           ,
+        o_clk_low     ,
+        i_clk    : clk,
+        i_rst    : rst,
+    );
+
+    initial {
+        rst.assert();
+        i_d = 'b101;
+        clk.next();
+        clk.next();
+        clk.next();
+        $assert(dut.integrator_d[1] == 'b1111);
+        $finish();
+    }
+}
