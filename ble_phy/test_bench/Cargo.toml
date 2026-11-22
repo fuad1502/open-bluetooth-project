@@ -7,6 +7,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
+rustfft = "6.4.1"
 veryl-component = "0.1.2"
 
 # Standalone package: keep it out of any enclosing cargo workspace.

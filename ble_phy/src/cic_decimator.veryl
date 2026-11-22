@@ -190,6 +190,7 @@ module test_cic {
     inst clk: $tb::clock_gen;
     inst rst: $tb::reset_gen ( clk );
 
+    var freq    : u64             ;
     var i_d     : signed logic<32>;
     var o_d     : signed logic<32>;
     var o_clk_en: logic           ;
@@ -206,24 +207,57 @@ module test_cic {
 
     inst data_gen: $comp::generator #(
         Width     : 32      ,
-        Freq      : 100000  ,
         SampleRate: 20000000,
     ) (
         clk      ,
         rst      ,
+        freq     ,
         data: i_d,
     );
 
+    inst analyzer: $comp::analyzer #(
+        Width     : 32     ,
+        SampleRate: 4000000,
+    ) (
+        clk             ,
+        rst             ,
+        clk_en: o_clk_en,
+        data  : o_d     ,
+    );
+
     initial {
+        // Check 1 kHz
+        freq = 1000;
         rst.assert();
-        for _ in 0..2000 {
+        for _ in 0..(8192 * 5) {
             clk.next();
-            clk.next();
-            clk.next();
-            clk.next();
-            clk.next();
-            $display("o_d = %d", dut.o_d);
         }
+        analyzer.check_loss(freq, 1, 1);
+
+        // Check 100 kHz
+        freq = 100000;
+        rst.assert();
+        for _ in 0..(8192 * 5) {
+            clk.next();
+        }
+        analyzer.check_loss(freq, 1, 1);
+
+        // Check 1 MHz
+        freq = 1000000;
+        rst.assert();
+        for _ in 0..(8192 * 5) {
+            clk.next();
+        }
+        analyzer.check_loss_less_than(freq, 3);
+
+        // Check 1.5 MHz
+        freq = 1500000;
+        rst.assert();
+        for _ in 0..(8192 * 5) {
+            clk.next();
+        }
+        analyzer.check_loss_greater_than(freq, 60);
+
         $finish();
     }
 }
