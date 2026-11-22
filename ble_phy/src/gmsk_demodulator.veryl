@@ -1,0 +1,39 @@
+module GmskDemodulator #(
+    param Width: u32 = 32,
+) (
+    i_inphase   : input  logic<Width>,
+    i_quadrature: input  logic<Width>,
+    o_freq      : output logic<Width>,
+    i_clk       : input  clock       ,
+    i_rst       : input  reset       ,
+    i_clk_en    : input  logic       ,
+) {
+    var inphase_delayed   ;
+    var quadrature_delayed;
+
+    always_ff {
+        if i_clk_en {
+            inphase_delayed    = i_inphase;
+            quadrature_delayed = i_quadrature;
+        }
+    }
+
+    let conj_multiplied_real: logic<Width> = i_inphase * inphase_delayed - i_quadrature * quadrature_delayed;
+    let conj_multiplied_imag: logic<Width> = i_inphase * quadrature_delayed + i_quadrature * inphase_delayed;
+
+    inst atan: Atan #(
+        Width  ,
+    ) (
+        i_y    : conj_multiplied_imag,
+        i_x    : conj_multiplied_real,
+        o_phase: o_freq              ,
+    );
+}
+
+module Atan #(
+    param Width: u32 = 32,
+) (
+    i_y    : input  logic<Width>,
+    i_x    : input  logic<Width>,
+    o_phase: output logic<Width>,
+) {}
