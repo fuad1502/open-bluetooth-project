@@ -1,0 +1,3 @@
+# Count .veryl files under SystemVerilog in the language stats bar
+*.veryl linguist-language=SystemVerilog
+*.veryl linguist-detectable=true
