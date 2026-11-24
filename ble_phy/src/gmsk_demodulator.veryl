@@ -27,6 +27,7 @@ module GmskDemodulator #(
         }
     }
 
+    // TODO: Check if this is enough
     const ExpandedWidth: u32 = Width
         * 2;
 
