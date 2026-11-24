@@ -56,9 +56,11 @@ module GmskDemodulator #(
 }
 
 module Atan #(
-    param Width: u32                     = 32,
-    param N    : u32                     = 32,
-    param LUT  : signed logic<Width> [N] = '{
+    param Width    : u32                     = 32                                  ,
+    param N        : u32                     = 32                                  ,
+    param MagScale : signed logic<Width>     = 32'b00100110110111000101110101100011, // 0.607
+    param Fractions: u32                     = 30                                  ,
+    param LUT      : signed logic<Width> [N] = '{
         32'b00001010101010101010101010101011, 32'b01000010101010101010101010101010,
         32'b00100111010110110000101010101000, 32'b00010100110010110110000000010100,
         32'b00001010100011100011101001111010, 32'b00000101010011000101101110100001,
@@ -119,7 +121,7 @@ module Atan #(
     }
 
     assign o_phase = angle[N - 1];
-    assign o_mag   = (xr[N - 1] >> 2) as Width;
+    assign o_mag   = ((xr[N - 1] as (Width * 2) * MagScale as (Width * 2)) >> Fractions) as Width;
 }
 
 #[test(test_atan)]
@@ -133,12 +135,14 @@ module test_atan {
     var i_y        : signed logic<32>;
     var i_x        : signed logic<32>;
     var o_phase    : signed logic<32>;
+    var o_mag      : signed logic<32>;
     var o_phase_pos: signed logic<32>;
 
     inst atan: Atan (
         i_y          ,
         i_x          ,
         o_phase      ,
+        o_mag        ,
         i_clk   : clk,
         i_rst   : rst,
         i_clk_en: 1  ,
@@ -154,6 +158,8 @@ module test_atan {
         }
         $assert(utils.convert_degree(o_phase) <= 46);
         $assert(utils.convert_degree(o_phase) >= 44);
+        $assert(o_mag <= 143);
+        $assert(o_mag >= 139);
 
         // -45 degree
         i_y = -100;
@@ -165,6 +171,8 @@ module test_atan {
         o_phase_pos = -o_phase;
         $assert(utils.convert_degree(o_phase_pos) <= 46);
         $assert(utils.convert_degree(o_phase_pos) >= 44);
+        $assert(o_mag <= 143);
+        $assert(o_mag >= 139);
 
         // 25 degree
         i_y = 4663;
@@ -175,6 +183,8 @@ module test_atan {
         }
         $assert(utils.convert_degree(o_phase) <= 26);
         $assert(utils.convert_degree(o_phase) >= 24);
+        $assert(o_mag <= 11035);
+        $assert(o_mag >= 11031);
 
         // -25 degree
         i_y = -4663;
@@ -186,6 +196,8 @@ module test_atan {
         o_phase_pos = -o_phase;
         $assert(utils.convert_degree(o_phase_pos) <= 26);
         $assert(utils.convert_degree(o_phase_pos) >= 24);
+        $assert(o_mag <= 11044);
+        $assert(o_mag >= 11022);
     }
 }
 
@@ -205,11 +217,13 @@ module test_demod {
 
     var o_freq    : signed logic<32>;
     var o_freq_pos: signed logic<32>;
+    var o_mag     : signed logic<32>;
 
     inst demod: GmskDemodulator (
         i_inphase   : o_i   ,
         i_quadrature: o_q   ,
         o_freq      : o_freq,
+        o_mag               ,
         i_clk       : clk   ,
         i_rst       : rst   ,
         i_clk_en    : 1     ,
@@ -225,6 +239,8 @@ module test_demod {
         }
         $assert(utils.convert_degree(o_freq) <= 73);
         $assert(utils.convert_degree(o_freq) >= 71);
+        $assert(o_mag <= 1073800000);
+        $assert(o_mag >= 1073600000);
 
         // -400 kHz
         // -> 2 * PI * F / Fs * D = -72
@@ -237,6 +253,8 @@ module test_demod {
         o_freq_pos = -o_freq;
         $assert(utils.convert_degree(o_freq_pos) <= 74);
         $assert(utils.convert_degree(o_freq_pos) >= 70);
+        $assert(o_mag <= 1073800000);
+        $assert(o_mag >= 1073600000);
 
         // 50 kHz
         // -> 2 * PI * F / Fs * D = 9
@@ -247,6 +265,8 @@ module test_demod {
         }
         $assert(utils.convert_degree(o_freq) <= 10);
         $assert(utils.convert_degree(o_freq) >= 8);
+        $assert(o_mag <= 1073800000);
+        $assert(o_mag >= 1073600000);
 
         // -50 kHz
         // -> 2 * PI * F / Fs * D = -9
@@ -258,5 +278,7 @@ module test_demod {
         o_freq_pos = -o_freq;
         $assert(utils.convert_degree(o_freq_pos) <= 11);
         $assert(utils.convert_degree(o_freq_pos) >= 7);
+        $assert(o_mag <= 1073800000);
+        $assert(o_mag >= 1073600000);
     }
 }
