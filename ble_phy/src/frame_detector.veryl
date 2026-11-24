@@ -3,44 +3,30 @@ module FrameDetector #(
     param AAMatchThreshold    : signed logic<Width> = 0 ,
     param IQMagnitudeThreshold: signed logic<Width> = 0 ,
 ) (
-    i_inphase   : input  signed logic<Width>               ,
-    i_quadrature: input  signed logic<Width>               ,
-    i_aa        : input  logic       <32>    = 32'h8E89BED6,
-    o_demod     : output signed logic<Width>               ,
-    o_aa_match  : output logic                             ,
-    o_cfo       : output signed logic<Width>               ,
-    i_clk       : input  clock                             ,
-    i_rst       : input  reset                             ,
-    i_clk_en    : input  logic                             ,
+    i_demod   : input  signed logic<Width>               ,
+    i_mag     : input  signed logic<Width>               ,
+    i_aa      : input  logic       <32>    = 32'h8E89BED6,
+    o_demod   : output signed logic<Width>               ,
+    o_aa_match: output logic                             ,
+    o_cfo     : output signed logic<Width>               ,
+    i_clk     : input  clock                             ,
+    i_rst     : input  reset                             ,
+    i_clk_en  : input  logic                             ,
 ) {
-    var freq        : signed logic<Width>;
-    var freq_delayed: signed logic<Width>;
-    var mag         : signed logic<Width>;
-
-    inst demod: GmskDemodulator (
-        i_inphase         ,
-        i_quadrature      ,
-        o_freq      : freq,
-        o_mag       : mag ,
-        i_clk             ,
-        i_rst             ,
-        i_clk_en          ,
-    );
-
     inst delay_line_0: Delay #(
         D: 32 * 4 + 6 * 4,
     ) (
-        i_d     : freq        ,
-        o_d     : freq_delayed,
-        i_clk                 ,
-        i_rst                 ,
-        i_clk_en              ,
+        i_d     : i_demod,
+        o_d     : o_demod,
+        i_clk            ,
+        i_rst            ,
+        i_clk_en         ,
     );
 
     var mag_avg: signed logic<Width>;
 
     inst iq_mag_average: IQMagnitudeAverager (
-        i_mag   : mag    ,
+        i_mag   : i_mag  ,
         o_mag   : mag_avg,
         i_clk            ,
         i_rst            ,
@@ -51,11 +37,11 @@ module FrameDetector #(
     var cfo_delayed: signed logic<Width>;
 
     inst cfo_estimator: CFOEstimator (
-        i_demod : freq,
-        o_cfo   : cfo ,
-        i_clk         ,
-        i_rst         ,
-        i_clk_en      ,
+        i_demod      ,
+        o_cfo   : cfo,
+        i_clk        ,
+        i_rst        ,
+        i_clk_en     ,
     );
 
     inst delay_line_1: Delay #(
@@ -72,14 +58,13 @@ module FrameDetector #(
 
     inst correlator: AccessAddressCorrelator (
         i_aa          ,
-        i_demod : freq,
+        i_demod       ,
         o_corr  : corr,
         i_clk         ,
         i_rst         ,
         i_clk_en      ,
     );
 
-    assign o_demod    = freq_delayed;
     assign o_aa_match = corr >: AAMatchThreshold && mag_avg >: IQMagnitudeThreshold;
     assign o_cfo      = cfo_delayed;
 }
