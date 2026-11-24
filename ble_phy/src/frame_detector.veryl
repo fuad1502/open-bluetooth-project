@@ -1,7 +1,7 @@
 module FrameDetector #(
-    param Width               : u32 = 32,
-    param AAMatchThreshold    : u32 = 0 ,
-    param IQMagnitudeThreshold: u32 = 0 ,
+    param Width               : u32                 = 32,
+    param AAMatchThreshold    : signed logic<Width> = 0 ,
+    param IQMagnitudeThreshold: signed logic<Width> = 0 ,
 ) (
     i_inphase   : input  signed logic<Width>               ,
     i_quadrature: input  signed logic<Width>               ,
@@ -13,9 +13,9 @@ module FrameDetector #(
     i_rst       : input  reset                             ,
     i_clk_en    : input  logic                             ,
 ) {
-    var freq        : logic<Width>;
-    var freq_delayed: logic<Width>;
-    var mag         : logic<Width>;
+    var freq        : signed logic<Width>;
+    var freq_delayed: signed logic<Width>;
+    var mag         : signed logic<Width>;
 
     inst demod: GmskDemodulator (
         i_inphase         ,
@@ -37,7 +37,7 @@ module FrameDetector #(
         i_clk_en              ,
     );
 
-    var mag_avg: logic<Width>;
+    var mag_avg: signed logic<Width>;
 
     inst iq_mag_average: IQMagnitudeAverager (
         i_mag   : mag    ,
@@ -47,8 +47,8 @@ module FrameDetector #(
         i_clk_en         ,
     );
 
-    var cfo        : logic<Width>;
-    var cfo_delayed: logic<Width>;
+    var cfo        : signed logic<Width>;
+    var cfo_delayed: signed logic<Width>;
 
     inst cfo_estimator: CFOEstimator (
         i_demod : freq,
@@ -68,7 +68,7 @@ module FrameDetector #(
         i_clk_en             ,
     );
 
-    var corr: logic<Width>;
+    var corr: signed logic<Width>;
 
     inst correlator: AccessAddressCorrelator (
         i_aa          ,
@@ -86,6 +86,11 @@ module FrameDetector #(
 
 module IQMagnitudeAverager #(
     param Width: u32 = 32,
+    // TODO: Determine fractions automatically
+    param Fractions: u32 = 30    ,
+    param N        : u32 = 32 * 4,
+    // TODO: Calculate B from above parameters (1 / N * (2 ** Fractions))
+    param B: signed logic<Width> = 32'b00000000100000000000000000000000,
 ) (
     i_mag   : input  signed logic<Width>,
     o_mag   : output signed logic<Width>,
@@ -95,10 +100,10 @@ module IQMagnitudeAverager #(
 ) {
     // TODO: Use 1'b1 as coefficients and scale in the end
     inst moving_avg_filt: Fir #(
-        Width                                                           ,
-        Fractions: 31                                                   ,
-        N        : 32 * 4,
-        Bs       : '{'b00000001000000000000000000000000 repeat (32 * 4)},
+        Width                   ,
+        Fractions               ,
+        N                       ,
+        Bs       : '{B repeat N},
     ) (
         i_d     : i_mag,
         o_d     : o_mag,
@@ -109,8 +114,12 @@ module IQMagnitudeAverager #(
 }
 
 module CFOEstimator #(
-    param Width : u32 = 32   ,
-    param CfoLen: u32 = 6 * 4,
+    param Width: u32 = 32,
+    // TODO: Determine fractions automatically
+    param Fractions: u32 = 30   ,
+    param CfoLen   : u32 = 6 * 4,
+    // TODO: Calculate B from above parameters (1 / CfoLen * (2 ** Fractions))
+    param B: signed logic<Width> = 32'b00000010101010101010101010101010,
 ) (
     i_demod : input  logic<Width>,
     o_cfo   : output logic<Width>,
@@ -120,10 +129,10 @@ module CFOEstimator #(
 ) {
     // TODO: Use 1'b1 as coefficients and scale in the end
     inst moving_avg_filt: Fir #(
-        Width                                                          ,
-        Fractions: 31                                                  ,
-        N        : CfoLen                                              ,
-        Bs       : '{'b00000101010101010101010101010101 repeat (6 * 4)},
+        Width                        ,
+        Fractions                    ,
+        N        : CfoLen            ,
+        Bs       : '{B repeat CfoLen},
     ) (
         i_d     : i_demod,
         o_d     : o_cfo  ,
@@ -134,7 +143,8 @@ module CFOEstimator #(
 }
 
 module AccessAddressCorrelator #(
-    param Width    : u32 = 32,
+    param Width: u32 = 32,
+    // TODO: Determine fractions automatically
     param Fractions: u32 = 29,
 ) (
     i_aa    : input  logic       <32>   ,
@@ -145,8 +155,8 @@ module AccessAddressCorrelator #(
     i_clk_en: input  logic              ,
 ) {
     /* Calculate AA bits sum */
-    var aa_bits_sum_d: logic<$clog2(32)> [32];
-    var aa_bits_sum  : logic<$clog2(32)>     ;
+    var aa_bits_sum_d: signed logic<$clog2(32)> [32];
+    var aa_bits_sum  : signed logic<$clog2(32)>     ;
 
     always_comb {
         for i in 0..32 {
@@ -167,7 +177,7 @@ module AccessAddressCorrelator #(
     }
 
     assign aa_bits_sum = aa_bits_sum_d[31];
-    let aa_bits_avg: logic<Width> = (aa_bits_sum as Width) << Fractions >> $clog2(32);
+    let aa_bits_avg: signed logic<Width> = (aa_bits_sum as Width) << Fractions >> $clog2(32);
 
     /* Calculate AA bits */
     var aa_bits: signed logic<Width> [32 * 4];
