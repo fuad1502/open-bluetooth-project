@@ -5,6 +5,7 @@ module GmskDemodulator #(
     i_inphase   : input  signed logic<Width>,
     i_quadrature: input  signed logic<Width>,
     o_freq      : output signed logic<Width>,
+    o_mag       : output signed logic<Width>,
     i_clk       : input  clock              ,
     i_rst       : input  reset              ,
     i_clk_en    : input  logic              ,
@@ -47,6 +48,7 @@ module GmskDemodulator #(
         i_y     : (conj_multiplied_imag >>> Width) as Width,
         i_x     : (conj_multiplied_real >>> Width) as Width,
         o_phase : o_freq                                   ,
+        o_mag                                              ,
         i_clk                                              ,
         i_rst                                              ,
         i_clk_en                                           ,
@@ -78,6 +80,7 @@ module Atan #(
     i_y     : input  signed logic<Width>,
     i_x     : input  signed logic<Width>,
     o_phase : output signed logic<Width>,
+    o_mag   : output signed logic<Width>,
     i_clk   : input  clock              ,
     i_rst   : input  reset              ,
     i_clk_en: input  logic              ,
@@ -116,6 +119,7 @@ module Atan #(
     }
 
     assign o_phase = angle[N - 1];
+    assign o_mag   = (xr[N - 1] >> 2) as Width;
 }
 
 #[test(test_atan)]

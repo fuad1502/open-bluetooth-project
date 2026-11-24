@@ -111,7 +111,7 @@ module Fir #(
     i_clk_en: input  logic              ,
     i_rst   : input  reset              ,
 ) {
-    const Expansion    : u32 = Width + $clog2(N);
+    const Expansion    : u32 = Width + $clog2(N); // TODO: Calculate expansion required from Bs
     const ExpandedWidth: u32 = Width + Expansion;
 
     var tap_d: signed logic<Width> [N - 1];

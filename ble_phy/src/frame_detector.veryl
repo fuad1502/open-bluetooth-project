@@ -1,43 +1,221 @@
 module FrameDetector #(
+    param Width               : u32 = 32,
+    param AAMatchThreshold    : u32 = 0 ,
+    param IQMagnitudeThreshold: u32 = 0 ,
+) (
+    i_inphase   : input  signed logic<Width>               ,
+    i_quadrature: input  signed logic<Width>               ,
+    i_aa        : input  logic       <32>    = 32'h8E89BED6,
+    o_demod     : output signed logic<Width>               ,
+    o_aa_match  : output logic                             ,
+    o_cfo       : output signed logic<Width>               ,
+    i_clk       : input  clock                             ,
+    i_rst       : input  reset                             ,
+    i_clk_en    : input  logic                             ,
+) {
+    var freq        : logic<Width>;
+    var freq_delayed: logic<Width>;
+    var mag         : logic<Width>;
+
+    inst demod: GmskDemodulator (
+        i_inphase         ,
+        i_quadrature      ,
+        o_freq      : freq,
+        o_mag       : mag ,
+        i_clk             ,
+        i_rst             ,
+        i_clk_en          ,
+    );
+
+    inst delay_line_0: Delay #(
+        D: 32 * 4 + 6 * 4,
+    ) (
+        i_d     : freq        ,
+        o_d     : freq_delayed,
+        i_clk                 ,
+        i_rst                 ,
+        i_clk_en              ,
+    );
+
+    var mag_avg: logic<Width>;
+
+    inst iq_mag_average: IQMagnitudeAverager (
+        i_mag   : mag    ,
+        o_mag   : mag_avg,
+        i_clk            ,
+        i_rst            ,
+        i_clk_en         ,
+    );
+
+    var cfo        : logic<Width>;
+    var cfo_delayed: logic<Width>;
+
+    inst cfo_estimator: CFOEstimator (
+        i_demod : freq,
+        o_cfo   : cfo ,
+        i_clk         ,
+        i_rst         ,
+        i_clk_en      ,
+    );
+
+    inst delay_line_1: Delay #(
+        D: 32 * 4,
+    ) (
+        i_d     : cfo        ,
+        o_d     : cfo_delayed,
+        i_clk                ,
+        i_rst                ,
+        i_clk_en             ,
+    );
+
+    var corr: logic<Width>;
+
+    inst correlator: AccessAddressCorrelator (
+        i_aa          ,
+        i_demod : freq,
+        o_corr  : corr,
+        i_clk         ,
+        i_rst         ,
+        i_clk_en      ,
+    );
+
+    assign o_demod    = freq_delayed;
+    assign o_aa_match = corr >: AAMatchThreshold && mag_avg >: IQMagnitudeThreshold;
+    assign o_cfo      = cfo_delayed;
+}
+
+module IQMagnitudeAverager #(
     param Width: u32 = 32,
 ) (
-    i_inphase   : input  logic<Width>,
-    i_quadrature: input  logic<Width>,
-    i_aa        : input  logic<Width>,
-    demod_signal: output logic<Width>,
-    aa_match    : output logic       ,
-    cfo_match   : output logic<Width>,
-    i_clk       : input  clock       ,
-    i_rst       : input  reset       ,
-    i_clk_en    : input  logic       ,
-) {}
-
-module IQMagnitude #(
-    param Width: u32 = 32,
-
-) (
-    i_inphase   : input  logic<Width>,
-    i_quadrature: input  logic<Width>,
-    o_magnitude : output logic<Width>,
-) {}
+    i_mag   : input  signed logic<Width>,
+    o_mag   : output signed logic<Width>,
+    i_clk   : input  clock              ,
+    i_rst   : input  reset              ,
+    i_clk_en: input  logic              ,
+) {
+    // TODO: Create & use moving average component
+    inst moving_avg_filt: Fir #(
+        Width                                                           ,
+        Fractions: 31                                                   ,
+        N        : 32 * 4,
+        Bs       : '{'b00000001000000000000000000000000 repeat (32 * 4)},
+    ) (
+        i_d     : i_mag,
+        o_d     : o_mag,
+        i_clk          ,
+        i_clk_en       ,
+        i_rst          ,
+    );
+}
 
 module CFOEstimator #(
-    param Width: u32 = 32,
+    param Width : u32 = 32   ,
+    param CfoLen: u32 = 6 * 4,
 ) (
     i_demod : input  logic<Width>,
     o_cfo   : output logic<Width>,
     i_clk   : input  clock       ,
     i_rst   : input  reset       ,
     i_clk_en: input  logic       ,
-) {}
+) {
+    // TODO: Create & use moving average component
+    inst moving_avg_filt: Fir #(
+        Width                                                          ,
+        Fractions: 31                                                  ,
+        N        : CfoLen                                              ,
+        Bs       : '{'b00000101010101010101010101010101 repeat (6 * 4)},
+    ) (
+        i_d     : i_demod,
+        o_d     : o_cfo  ,
+        i_clk            ,
+        i_clk_en         ,
+        i_rst            ,
+    );
+}
 
 module AccessAddressCorrelator #(
     param Width: u32 = 32,
 ) (
-    i_aa    : input  logic<Width>,
-    i_demod : input  logic<Width>,
-    o_corr  : output logic<Width>,
-    i_clk   : input  clock       ,
-    i_rst   : input  reset       ,
-    i_clk_en: input  logic       ,
-) {}
+    i_aa    : input  logic       <32>   ,
+    i_demod : input  signed logic<Width>,
+    o_corr  : output signed logic<Width>,
+    i_clk   : input  clock              ,
+    i_rst   : input  reset              ,
+    i_clk_en: input  logic              ,
+) {
+    /* Calculate AA bits */
+    const Fractions: u32                          = 30;
+    var   aa_bits  : signed logic<Width> [32 * 4];
+
+    always_comb {
+        let neg1: signed logic<Width> = 'b11 as Width << Fractions;
+        let pos1: signed logic<Width> = 'b01 as Width << Fractions;
+
+        for i in 0..32 {
+            if i_aa[i] == 0 {
+                aa_bits[4 * i + 0] = neg1;
+                aa_bits[4 * i + 1] = neg1;
+                aa_bits[4 * i + 2] = neg1;
+                aa_bits[4 * i + 3] = neg1;
+            } else {
+                aa_bits[4 * i + 0] = pos1;
+                aa_bits[4 * i + 1] = pos1;
+                aa_bits[4 * i + 2] = pos1;
+                aa_bits[4 * i + 3] = pos1;
+            }
+        }
+    }
+
+    /* Calculate AA bits sum */
+    var aa_bits_sum_d: logic<$clog2(32)> [32];
+    var aa_bits_sum  : logic<$clog2(32)>     ;
+
+    always_comb {
+        for i in 0..32 {
+            if i == 0 {
+                aa_bits_sum_d[i] = i_aa[i] as ($clog2(32));
+            } else {
+                aa_bits_sum_d[i] = aa_bits_sum_d[i - 1] + i_aa[i];
+            }
+        }
+    }
+
+    assign aa_bits_sum = aa_bits_sum_d[31];
+
+    /* Calculate correlation */
+    var corr: signed logic<Width>;
+
+    inst correlator: FirGeneric #(
+        Width            ,
+        Fractions        ,
+        N        : 32 * 4,
+    ) (
+        i_d     : i_demod,
+        bs      : aa_bits,
+        o_d     : corr   ,
+        i_clk            ,
+        i_clk_en         ,
+        i_rst            ,
+    );
+
+    /* Calculate AA average */
+    var aa_avg: signed logic<Width>;
+
+    // TODO: Create & use moving average component
+    inst access_address_avg: Fir #(
+        Width                                                           ,
+        Fractions: 31                                                   ,
+        N        : 32 * 4,
+        Bs       : '{'b00000001000000000000000000000000 repeat (32 * 4)},
+    ) (
+        i_d     : i_demod,
+        o_d     : aa_avg ,
+        i_clk            ,
+        i_clk_en         ,
+        i_rst            ,
+    );
+
+    /* Calculate CFO free correlation */
+    let dc_offset: signed logic<Width> = aa_avg * aa_bits_sum as Width;
+    assign o_corr = corr - dc_offset;
+}
