@@ -38,11 +38,12 @@ module GmskDemodulator #(
     inst atan: Atan #(
         Width  ,
     ) (
-        i_y    : (conj_multiplied_imag >>> Width) as Width,
-        i_x    : (conj_multiplied_real >>> Width) as Width,
-        o_phase: o_freq                                   ,
-        i_clk                                             ,
-        i_rst                                             ,
+        i_y     : (conj_multiplied_imag >>> Width) as Width,
+        i_x     : (conj_multiplied_real >>> Width) as Width,
+        o_phase : o_freq                                   ,
+        i_clk                                              ,
+        i_rst                                              ,
+        i_clk_en                                           ,
     );
 }
 
@@ -51,39 +52,42 @@ module Atan #(
     param N    : u32                     = 2      ,
     param LUT  : signed logic<Width> [N] = '{1, 1},
 ) (
-    i_y    : input  signed logic<Width>,
-    i_x    : input  signed logic<Width>,
-    o_phase: output signed logic<Width>,
-    i_clk  : input  clock              ,
-    i_rst  : input  reset              ,
+    i_y     : input  signed logic<Width>,
+    i_x     : input  signed logic<Width>,
+    o_phase : output signed logic<Width>,
+    i_clk   : input  clock              ,
+    i_rst   : input  reset              ,
+    i_clk_en: input  logic              ,
 ) {
     var yr   : signed logic<Width + 2> [N];
     var xr   : signed logic<Width + 2> [N];
     var angle: signed logic<Width>     [N];
 
     always_ff {
-        if i_x[msb] == 1 && i_y[msb] == 1 {
-            xr[0]    = -i_x as (Width + 2);
-            yr[0]    = -i_y as (Width + 2);
-            angle[0] = -LUT[0];
-        } else if i_x[msb] == 1 && i_y[msb] != 1 {
-            xr[0]    = -i_x as (Width + 2);
-            yr[0]    = -i_y as (Width + 2);
-            angle[0] = LUT[0];
-        } else {
-            xr[0]    = i_x as (Width + 2);
-            yr[0]    = i_y as (Width + 2);
-            angle[0] = 0;
-        }
-        for i in 1..N {
-            if yr[i - 1][msb] == 1 {
-                xr[i]    = xr[i - 1] - (yr[i - 1] >>> (i - 1));
-                yr[i]    = yr[i - 1] + (xr[i - 1] >>> (i - 1));
-                angle[i] = angle[i - 1] - LUT[i];
+        if i_clk_en {
+            if i_x[msb] == 1 && i_y[msb] == 1 {
+                xr[0]    = -i_x as (Width + 2);
+                yr[0]    = -i_y as (Width + 2);
+                angle[0] = -LUT[0];
+            } else if i_x[msb] == 1 && i_y[msb] != 1 {
+                xr[0]    = -i_x as (Width + 2);
+                yr[0]    = -i_y as (Width + 2);
+                angle[0] = LUT[0];
             } else {
-                xr[i]    = xr[i - 1] + (yr[i - 1] >>> (i - 1));
-                yr[i]    = yr[i - 1] - (xr[i - 1] >>> (i - 1));
-                angle[i] = angle[i - 1] + LUT[i];
+                xr[0]    = i_x as (Width + 2);
+                yr[0]    = i_y as (Width + 2);
+                angle[0] = 0;
+            }
+            for i in 1..N {
+                if yr[i - 1][msb] == 1 {
+                    xr[i]    = xr[i - 1] - (yr[i - 1] >>> (i - 1));
+                    yr[i]    = yr[i - 1] + (xr[i - 1] >>> (i - 1));
+                    angle[i] = angle[i - 1] - LUT[i];
+                } else {
+                    xr[i]    = xr[i - 1] + (yr[i - 1] >>> (i - 1));
+                    yr[i]    = yr[i - 1] - (xr[i - 1] >>> (i - 1));
+                    angle[i] = angle[i - 1] + LUT[i];
+                }
             }
         }
     }
