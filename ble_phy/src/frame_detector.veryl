@@ -1,0 +1,43 @@
+module FrameDetector #(
+    param Width: u32 = 32,
+) (
+    i_inphase   : input  logic<Width>,
+    i_quadrature: input  logic<Width>,
+    i_aa        : input  logic<Width>,
+    demod_signal: output logic<Width>,
+    aa_match    : output logic       ,
+    cfo_match   : output logic<Width>,
+    i_clk       : input  clock       ,
+    i_rst       : input  reset       ,
+    i_clk_en    : input  logic       ,
+) {}
+
+module IQMagnitude #(
+    param Width: u32 = 32,
+
+) (
+    i_inphase   : input  logic<Width>,
+    i_quadrature: input  logic<Width>,
+    o_magnitude : output logic<Width>,
+) {}
+
+module CFOEstimator #(
+    param Width: u32 = 32,
+) (
+    i_demod : input  logic<Width>,
+    o_cfo   : output logic<Width>,
+    i_clk   : input  clock       ,
+    i_rst   : input  reset       ,
+    i_clk_en: input  logic       ,
+) {}
+
+module AccessAddressCorrelator #(
+    param Width: u32 = 32,
+) (
+    i_aa    : input  logic<Width>,
+    i_demod : input  logic<Width>,
+    o_corr  : output logic<Width>,
+    i_clk   : input  clock       ,
+    i_rst   : input  reset       ,
+    i_clk_en: input  logic       ,
+) {}
