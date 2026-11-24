@@ -118,8 +118,8 @@ module Atan #(
     assign o_phase = angle[N - 1];
 }
 
-#[test(test_demod)]
-module test_demod {
+#[test(test_atan)]
+module test_atan {
     // TODO: Remove this component! Change to Atan verification model.
     var utils: $comp::utils::<32>;
 
@@ -182,5 +182,77 @@ module test_demod {
         o_phase_pos = -o_phase;
         $assert(utils.convert_degree(o_phase_pos) <= 26);
         $assert(utils.convert_degree(o_phase_pos) >= 24);
+    }
+}
+
+#[test(test_demod)]
+module test_demod {
+    // TODO: Remove this component! Change to Demod verification model.
+    var utils: $comp::utils::<32>;
+
+    inst clk: $tb::clock_gen;
+    inst rst: $tb::reset_gen ( clk );
+
+    var freq: signed logic<32>;
+    var o_i : signed logic<32>;
+    var o_q : signed logic<32>;
+
+    inst fm_modulator: $comp::fm_modulator #( Width: 32, SampleRate: 4000000 ) ( clk, rst, freq, o_i, o_q );
+
+    var o_freq    : signed logic<32>;
+    var o_freq_pos: signed logic<32>;
+
+    inst demod: GmskDemodulator (
+        i_inphase   : o_i   ,
+        i_quadrature: o_q   ,
+        o_freq      : o_freq,
+        i_clk       : clk   ,
+        i_rst       : rst   ,
+        i_clk_en    : 1     ,
+    );
+
+    initial {
+        // 400 kHz
+        // -> 2 * PI * F / Fs * D = 72
+        freq = 400000;
+        rst.assert();
+        for _ in 0..(32 + 3) {
+            clk.next();
+        }
+        $assert(utils.convert_degree(o_freq) <= 73);
+        $assert(utils.convert_degree(o_freq) >= 71);
+
+        // -400 kHz
+        // -> 2 * PI * F / Fs * D = -72
+        freq = -400000;
+
+        rst.assert();
+        for _ in 0..(32 + 3) {
+            clk.next();
+        }
+        o_freq_pos = -o_freq;
+        $assert(utils.convert_degree(o_freq_pos) <= 74);
+        $assert(utils.convert_degree(o_freq_pos) >= 70);
+
+        // 50 kHz
+        // -> 2 * PI * F / Fs * D = 9
+        freq = 50000;
+        rst.assert();
+        for _ in 0..(32 + 3) {
+            clk.next();
+        }
+        $assert(utils.convert_degree(o_freq) <= 10);
+        $assert(utils.convert_degree(o_freq) >= 8);
+
+        // -50 kHz
+        // -> 2 * PI * F / Fs * D = -9
+        freq = -50000;
+        rst.assert();
+        for _ in 0..(32 + 3) {
+            clk.next();
+        }
+        o_freq_pos = -o_freq;
+        $assert(utils.convert_degree(o_freq_pos) <= 11);
+        $assert(utils.convert_degree(o_freq_pos) >= 7);
     }
 }
