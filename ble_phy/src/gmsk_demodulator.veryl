@@ -26,17 +26,44 @@ module GmskDemodulator #(
         }
     }
 
-    const ExpandedWidth: u32 = Width * 2;
+    const ExpandedWidth: u32 = Width
+        * 2;
 
+    /* Conjugate multiply
+    * a + jb
+    * c - jd
+    * real = a * c + b * d
+    * imag = b * c - a * d
+    */
     let conj_multiplied_real: signed logic<ExpandedWidth> = i_inphase as ExpandedWidth
-        * inphase_delayed[Delay - 1] as ExpandedWidth - i_quadrature as ExpandedWidth
+        * inphase_delayed[Delay - 1] as ExpandedWidth + i_quadrature as ExpandedWidth
         * quadrature_delayed[Delay - 1] as ExpandedWidth;
-    let conj_multiplied_imag: signed logic<ExpandedWidth> = i_inphase as ExpandedWidth
-        * quadrature_delayed[Delay - 1] as ExpandedWidth + i_quadrature as ExpandedWidth
-        * inphase_delayed[Delay - 1] as ExpandedWidth;
+    let conj_multiplied_imag: signed logic<ExpandedWidth> = i_quadrature as ExpandedWidth
+        * inphase_delayed[Delay - 1] as ExpandedWidth - i_inphase as ExpandedWidth
+        * quadrature_delayed[Delay - 1] as ExpandedWidth;
 
+    /* Max deviation = 0.48 * PI */
     inst atan: Atan #(
-        Width  ,
+        Width    ,
+        N    : 32,
+        LUT  : '{
+            32'b00001010101010101010101010101011, 32'b01000010101010101010101010101010,
+            32'b00100111010110110000101010101000, 32'b00010100110010110110000000010100,
+            32'b00001010100011100011101001111010, 32'b00000101010011000101101110100001,
+            32'b00000010101001101101011100010101, 32'b00000001010100111000000010111111,
+            32'b00000000101010011100001100000111, 32'b00000000010101001110000111011000,
+            32'b00000000001010100111000011110111, 32'b00000000000101010011100001111101,
+            32'b00000000000010101001110000111111, 32'b00000000000001010100111000011111,
+            32'b00000000000000101010011100010000, 32'b00000000000000010101001110001000,
+            32'b00000000000000001010100111000100, 32'b00000000000000000101010011100010,
+            32'b00000000000000000010101001110001, 32'b00000000000000000001010100111000,
+            32'b00000000000000000000101010011100, 32'b00000000000000000000010101001110,
+            32'b00000000000000000000001010100111, 32'b00000000000000000000000101010100,
+            32'b00000000000000000000000010101010, 32'b00000000000000000000000001010101,
+            32'b00000000000000000000000000101010, 32'b00000000000000000000000000010101,
+            32'b00000000000000000000000000001011, 32'b00000000000000000000000000000101,
+            32'b00000000000000000000000000000011, 32'b00000000000000000000000000000001,
+        },
     ) (
         i_y     : (conj_multiplied_imag >>> Width) as Width,
         i_x     : (conj_multiplied_real >>> Width) as Width,
