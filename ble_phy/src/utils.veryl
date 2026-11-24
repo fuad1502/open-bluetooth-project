@@ -25,6 +25,53 @@ module Delay #(
     assign o_d = tap_d[D - 1];
 }
 
+module Fir #(
+    param Width    : u32                     = 32     ,
+    param Fractions: u32                     = 27     ,
+    param N        : u32                     = 2      ,
+    param Bs       : signed logic<Width> [N] = '{1, 1}, // TODO: Allow bs width to be smaller different from N
+) (
+    i_d     : input  signed logic<Width>,
+    o_d     : output signed logic<Width>,
+    i_clk   : input  clock              ,
+    i_clk_en: input  logic              ,
+    i_rst   : input  reset              ,
+) {
+    const Expansion    : u32 = Width + $clog2(N); // TODO: Calculate expansion required from Bs
+    const ExpandedWidth: u32 = Width + Expansion;
+
+    var tap_d: signed logic<Width> [N - 1];
+
+    always_ff {
+        if i_clk_en {
+            for i in 0..N - 1 {
+                if i == 0 {
+                    tap_d[i] = i_d;
+                } else {
+                    tap_d[i] = tap_d[i - 1];
+                }
+            }
+        }
+    }
+
+    var scaled_d: signed logic<ExpandedWidth> [N];
+    var sums    : signed logic<ExpandedWidth> [N];
+
+    always_comb {
+        for i in 0..N {
+            if i == 0 {
+                scaled_d[i] = (i_d as ExpandedWidth) * (Bs[i] as ExpandedWidth);
+                sums[i]     = scaled_d[i];
+            } else {
+                scaled_d[i] = (tap_d[i - 1] as ExpandedWidth) * (Bs[i] as ExpandedWidth);
+                sums[i]     = sums[i - 1] + scaled_d[i];
+            }
+        }
+    }
+
+    assign o_d = (sums[N - 1] >>> Fractions) as Width;
+}
+
 module FirGeneric #(
     param Width    : u32 = 32,
     param Fractions: u32 = 27,
