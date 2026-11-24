@@ -100,7 +100,9 @@ def cic_decimator(
     # Calculate FIR coefficients for HDL
     expansion = stages * int(np.ceil(np.log2(r * n)))
     scale_correction = (2**expansion) / dc_gain
-    fir_hw = fir * scale_correction * 0.9  # Keep output from clipping from ripple
+    fir_hw = (
+        fir * scale_correction * 0.9
+    )  # Keep output from clipping from ripple
     fractions = 27
     width = 32
     print(f"FIR coefficients = ")
@@ -115,10 +117,15 @@ def cic_decimator(
     return iq_out
 
 
-def gfsk_demodulator(iq_in: NDArray[np.complex64]) -> NDArray[np.float64]:
-    iq_delay = sig.lfilter([0, 1], [1], iq_in.astype(np.complex128))
+def gfsk_demodulator(
+    iq_in: NDArray[np.complex64], delay: int, max_deviation: float
+) -> NDArray[np.float64]:
+    b = np.zeros(delay + 1)
+    b[-1] = 1
+    iq_delay = sig.lfilter(b, [1], iq_in.astype(np.complex128))
     delay_conj_mult = iq_in * np.conj(iq_delay)
-    return np.atan2(delay_conj_mult.imag, delay_conj_mult.real)
+    phase = np.atan2(delay_conj_mult.imag, delay_conj_mult.real)
+    return phase.clip(-max_deviation, max_deviation)
 
 
 def bits_to_int(bits: list[int]) -> int:
@@ -229,7 +236,9 @@ def main() -> None:
     decimated_iq = decimated_iq[0 : round(len(decimated_iq) / 4) * 4]
 
     # Demodulate
-    demod = gfsk_demodulator(decimated_iq).clip(-0.3 * np.pi, 0.3 * np.pi)
+    delay = 2
+    max_deviation = 2 * np.pi * (250e3 + 150e3) / 4e6 * delay
+    demod = gfsk_demodulator(decimated_iq, delay, max_deviation)
 
     # I/Q magnitude
     magnitude = np.abs(decimated_iq)
@@ -248,11 +257,17 @@ def main() -> None:
     aa_bits = np.array([int(bit) for bit in f"{access_addr:032b}"])
     aa_bits = aa_bits * 2 - 1
     aa_corr = sig.lfilter(aa_bits.repeat(4), [1], demod)
-    aa_avg = sig.lfilter(np.ones_like(aa_bits.repeat(4)), [1], demod) / 32 / 4
+    aa_avg = (
+        sig.lfilter(np.ones_like(aa_bits.repeat(4)), [1], demod)
+        / len(aa_bits)
+        / 4
+    )
     aa_corr_dc_free = aa_corr - aa_avg * np.sum(aa_bits)
 
     # Matched signal
-    aa_match = (aa_corr_dc_free > 32) * magnitude_ok
+    aa_match = (
+        aa_corr_dc_free > (max_deviation * len(aa_bits) * 1.5)
+    ) * magnitude_ok
     cfo_match = cfo * aa_match
 
     # Isolate frames
@@ -297,7 +312,7 @@ def main() -> None:
                 error = detect_delay_2[i] * (detect[i] - detect_delay_4[i])
                 phase_error_acc += error * kp
                 phase_error_accs[i] = phase_error_acc
-                samples[i] = 0.3
+                samples[i] = max_deviation
             if phase_error_acc > 0.25:
                 phase_error_acc -= 0.25
                 phase -= 1
@@ -463,7 +478,7 @@ def main() -> None:
     axs["D"].plot(
         np.arange(len(magnitude_ok)), magnitude_ok, label="Magnitude OK"
     )
-    axs["D"].set_ylim(-0.5, 0.5)
+    axs["D"].set_ylim(-max_deviation, max_deviation)
     axs["D"].grid()
     axs["D"].legend()
 
@@ -479,7 +494,7 @@ def main() -> None:
             label="Phase accumulator",
         )
         axs["E"].stem(np.arange(len(samples)), samples, label="Samples")
-        axs["E"].set_ylim(-0.5, 0.5)
+        axs["E"].set_ylim(-max_deviation, max_deviation)
         axs["E"].set_xlim(0, (8 + 32 + 16 + pdu_length * 8) * 4)
         axs["E"].grid()
         axs["E"].legend()
