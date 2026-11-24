@@ -1,4 +1,5 @@
 import sys
+import math
 
 import numpy as np
 from numpy.typing import NDArray
@@ -125,7 +126,31 @@ def gfsk_demodulator(
     iq_delay = sig.lfilter(b, [1], iq_in.astype(np.complex128))
     delay_conj_mult = iq_in * np.conj(iq_delay)
     phase = np.atan2(delay_conj_mult.imag, delay_conj_mult.real)
-    return phase.clip(-max_deviation, max_deviation)
+
+    # Calculate CORDIC LUT for HDL
+    ## degree -> bits
+    ## degree = 180, atan(2^-i) % max_deviation
+    ## i = 0..N
+    ## max_deviation = 0b01...1
+
+    print(f"max_deviation = {max_deviation} ({max_deviation / np.pi} * PI)")
+    print(f"CORDIC LUT = ")
+    print("'{")
+    width = 32
+    N = 32
+    degree = math.fmod(np.pi, max_deviation)
+    val = int(round(degree / max_deviation * ((2 ** (width - 1)) - 1)))
+    print(f"32'b{to_twos_complement(val, width)},")
+
+    for i in range(N-1):
+        degree = np.atan(2 ** (-i))
+        degree = math.fmod(degree, max_deviation)
+        val = int(round(degree / max_deviation * ((2 ** (width - 1)) - 1)))
+        print(f"32'b{to_twos_complement(val, width)},")
+
+    print("'}")
+
+    return [math.fmod(degree, max_deviation) for degree in phase]
 
 
 def bits_to_int(bits: list[int]) -> int:
@@ -237,7 +262,8 @@ def main() -> None:
 
     # Demodulate
     delay = 2
-    max_deviation = 2 * np.pi * (250e3 + 150e3) / 4e6 * delay
+    max_deviation = 2 * np.pi * (250e3 + 150e3) / 4e6 * delay * 1.2
+    nominal_deviation = 2 * np.pi * 250e3 / 4e6 * delay
     demod = gfsk_demodulator(decimated_iq, delay, max_deviation)
 
     # I/Q magnitude
@@ -266,7 +292,7 @@ def main() -> None:
 
     # Matched signal
     aa_match = (
-        aa_corr_dc_free > (max_deviation * len(aa_bits) * 1.5)
+        aa_corr_dc_free > nominal_deviation * len(aa_bits) * 2
     ) * magnitude_ok
     cfo_match = cfo * aa_match
 
