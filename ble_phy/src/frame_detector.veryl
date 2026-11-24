@@ -93,7 +93,7 @@ module IQMagnitudeAverager #(
     i_rst   : input  reset              ,
     i_clk_en: input  logic              ,
 ) {
-    // TODO: Create & use moving average component
+    // TODO: Use 1'b1 as coefficients and scale in the end
     inst moving_avg_filt: Fir #(
         Width                                                           ,
         Fractions: 31                                                   ,
@@ -118,7 +118,7 @@ module CFOEstimator #(
     i_rst   : input  reset       ,
     i_clk_en: input  logic       ,
 ) {
-    // TODO: Create & use moving average component
+    // TODO: Use 1'b1 as coefficients and scale in the end
     inst moving_avg_filt: Fir #(
         Width                                                          ,
         Fractions: 31                                                  ,
@@ -148,8 +148,8 @@ module AccessAddressCorrelator #(
     var   aa_bits  : signed logic<Width> [32 * 4];
 
     always_comb {
-        let neg1: signed logic<Width> = 'b11 as Width << Fractions;
-        let pos1: signed logic<Width> = 'b01 as Width << Fractions;
+        let neg1: signed logic<Width> = ('b11 as Width << Fractions) >> $clog2(128);
+        let pos1: signed logic<Width> = ('b01 as Width << Fractions) >> $clog2(128);
 
         for i in 0..32 {
             if i_aa[i] == 0 {
@@ -185,6 +185,7 @@ module AccessAddressCorrelator #(
     /* Calculate correlation */
     var corr: signed logic<Width>;
 
+    // TODO: Use 1'b11 and 1'b01 as coefficients and scale in the end
     inst correlator: FirGeneric #(
         Width            ,
         Fractions        ,
@@ -201,7 +202,7 @@ module AccessAddressCorrelator #(
     /* Calculate AA average */
     var aa_avg: signed logic<Width>;
 
-    // TODO: Create & use moving average component
+    // TODO: Use 1'b1 as coefficients and scale in the end
     inst access_address_avg: Fir #(
         Width                                                           ,
         Fractions: 31                                                   ,
