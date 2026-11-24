@@ -1,34 +1,48 @@
 module GmskDemodulator #(
     param Width: u32 = 32,
+    param Delay: u32 = 2 ,
 ) (
-    i_inphase   : input  logic<Width>,
-    i_quadrature: input  logic<Width>,
-    o_freq      : output logic<Width>,
-    i_clk       : input  clock       ,
-    i_rst       : input  reset       ,
-    i_clk_en    : input  logic       ,
+    i_inphase   : input  signed logic<Width>,
+    i_quadrature: input  signed logic<Width>,
+    o_freq      : output signed logic<Width>,
+    i_clk       : input  clock              ,
+    i_rst       : input  reset              ,
+    i_clk_en    : input  logic              ,
 ) {
-    var inphase_delayed   ;
-    var quadrature_delayed;
+    var inphase_delayed   : signed logic<Width> [Delay];
+    var quadrature_delayed: signed logic<Width> [Delay];
 
     always_ff {
         if i_clk_en {
-            inphase_delayed    = i_inphase;
-            quadrature_delayed = i_quadrature;
+            for i in 0..Delay {
+                if i == 0 {
+                    inphase_delayed[i]    = i_inphase;
+                    quadrature_delayed[i] = i_quadrature;
+                } else {
+                    inphase_delayed[i]    = inphase_delayed[i - 1];
+                    quadrature_delayed[i] = quadrature_delayed[i - 1];
+                }
+            }
         }
     }
 
-    let conj_multiplied_real: logic<Width> = i_inphase * inphase_delayed - i_quadrature * quadrature_delayed;
-    let conj_multiplied_imag: logic<Width> = i_inphase * quadrature_delayed + i_quadrature * inphase_delayed;
+    const ExpandedWidth: u32 = Width * 2;
+
+    let conj_multiplied_real: signed logic<ExpandedWidth> = i_inphase as ExpandedWidth
+        * inphase_delayed[Delay - 1] as ExpandedWidth - i_quadrature as ExpandedWidth
+        * quadrature_delayed[Delay - 1] as ExpandedWidth;
+    let conj_multiplied_imag: signed logic<ExpandedWidth> = i_inphase as ExpandedWidth
+        * quadrature_delayed[Delay - 1] as ExpandedWidth + i_quadrature as ExpandedWidth
+        * inphase_delayed[Delay - 1] as ExpandedWidth;
 
     inst atan: Atan #(
         Width  ,
     ) (
-        i_y    : conj_multiplied_imag,
-        i_x    : conj_multiplied_real,
-        o_phase: o_freq              ,
-        i_clk                        ,
-        i_rst                        ,
+        i_y    : (conj_multiplied_imag >>> Width) as Width,
+        i_x    : (conj_multiplied_real >>> Width) as Width,
+        o_phase: o_freq                                   ,
+        i_clk                                             ,
+        i_rst                                             ,
     );
 }
 
@@ -49,16 +63,16 @@ module Atan #(
 
     always_ff {
         if i_x[msb] == 1 && i_y[msb] == 1 {
-            xr[0]    = -i_x;
-            yr[0]    = -i_y;
+            xr[0]    = -i_x as (Width + 2);
+            yr[0]    = -i_y as (Width + 2);
             angle[0] = -LUT[0];
         } else if i_x[msb] == 1 && i_y[msb] != 1 {
-            xr[0]    = -i_x;
-            yr[0]    = -i_y;
+            xr[0]    = -i_x as (Width + 2);
+            yr[0]    = -i_y as (Width + 2);
             angle[0] = LUT[0];
         } else {
-            xr[0]    = i_x;
-            yr[0]    = i_y;
+            xr[0]    = i_x as (Width + 2);
+            yr[0]    = i_y as (Width + 2);
             angle[0] = 0;
         }
         for i in 1..N {
