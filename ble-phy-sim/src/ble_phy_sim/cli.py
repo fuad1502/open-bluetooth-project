@@ -142,7 +142,7 @@ def gfsk_demodulator(
     val = int(round(degree / max_deviation * ((2 ** (width - 1)) - 1)))
     print(f"32'b{to_twos_complement(val, width)},")
 
-    for i in range(N-1):
+    for i in range(N - 1):
         degree = np.atan(2 ** (-i))
         degree = math.fmod(degree, max_deviation)
         val = int(round(degree / max_deviation * ((2 ** (width - 1)) - 1)))
@@ -282,18 +282,11 @@ def main() -> None:
     access_addr = 0x8E89BED6
     aa_bits = np.array([int(bit) for bit in f"{access_addr:032b}"])
     aa_bits = aa_bits * 2 - 1
+    aa_bits = aa_bits - sum(aa_bits) / len(aa_bits)
     aa_corr = sig.lfilter(aa_bits.repeat(4), [1], demod)
-    aa_avg = (
-        sig.lfilter(np.ones_like(aa_bits.repeat(4)), [1], demod)
-        / len(aa_bits)
-        / 4
-    )
-    aa_corr_dc_free = aa_corr - aa_avg * np.sum(aa_bits)
 
     # Matched signal
-    aa_match = (
-        aa_corr_dc_free > nominal_deviation * len(aa_bits) * 2
-    ) * magnitude_ok
+    aa_match = (aa_corr > nominal_deviation * len(aa_bits) * 2) * magnitude_ok
     cfo_match = cfo * aa_match
 
     # Isolate frames
