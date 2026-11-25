@@ -162,17 +162,17 @@ module AccessAddressCorrelator #(
     }
 
     assign aa_bits_sum = aa_bits_sum_d[31];
-    let aa_bits_avg: signed logic<Width> = (aa_bits_sum as Width) << Fractions >> $clog2(32);
+    let aa_bits_avg: signed logic<Width> = aa_bits_sum <<< Fractions >>> $clog2(32);
 
     /* Calculate AA bits */
     var aa_bits: signed logic<Width> [32 * 4];
 
     always_comb {
-        let neg1: signed logic<Width> = (((-1 as Width) << Fractions) - aa_bits_avg) >> $clog2(32 * 4);
-        let pos1: signed logic<Width> = (((1 as Width) << Fractions) - aa_bits_avg) >> $clog2(32 * 4);
+        let neg1: signed logic<Width> = ((-1 << Fractions) - aa_bits_avg) >>> $clog2(32 * 4);
+        let pos1: signed logic<Width> = ((1 << Fractions) - aa_bits_avg) >>> $clog2(32 * 4);
 
         for i in 0..32 {
-            if i_aa[i] == 0 {
+            if i_aa[31 - i] == 0 {
                 aa_bits[4 * i + 0] = neg1;
                 aa_bits[4 * i + 1] = neg1;
                 aa_bits[4 * i + 2] = neg1;
@@ -199,4 +199,121 @@ module AccessAddressCorrelator #(
         i_clk_en         ,
         i_rst            ,
     );
+}
+
+#[test(frame_detector_test)]
+module frame_detector_test {
+    inst clk: $tb::clock_gen;
+    inst rst: $tb::reset_gen ( clk );
+
+    const width         : u32 = 32;
+    const sps           : u32 = 4;
+    const amplitude     : i32 = 100;
+    const magnitude     : i32 = 50;
+    const offset        : i32 = 30;
+    const access_address: u32 = 32'h8E89BED6;
+
+    var i_demod   : signed logic<width>;
+    var i_mag     : signed logic<width>;
+    var o_demod   : signed logic<width>;
+    var o_aa_match: logic              ;
+    var o_cfo     : signed logic<width>;
+
+    inst frame_detector: FrameDetector #(
+        AAMatchThreshold    : amplitude - 10,
+        IQMagnitudeThreshold: magnitude - 1,
+    ) (
+        i_demod        ,
+        i_mag          ,
+        o_demod        ,
+        o_aa_match     ,
+        o_cfo          ,
+        i_clk     : clk,
+        i_rst     : rst,
+        i_clk_en  : 1  ,
+    );
+
+    var i_amplitude: signed logic<width>;
+    var i_offset   : signed logic<width>;
+    var i_data     : u64                ;
+    var i_data_en  : logic              ;
+
+    inst symbol_generator: $comp::symbol_generator #(
+        Width           : width,
+        SamplesPerSymbol: sps  ,
+        InverseBT       : 2    ,
+    ) (
+        i_amplitude         ,
+        i_offset            ,
+        i_data              ,
+        i_data_en           ,
+        o_data     : i_demod,
+        clk                 ,
+        rst                 ,
+    );
+
+    initial {
+        rst.assert();
+        i_mag       = magnitude;
+        i_amplitude = amplitude;
+        i_offset    = offset;
+        i_data      = {access_address, 8'b10101010};
+        i_data_en   = 1;
+
+        clk.next();
+        i_data_en = 0;
+
+        // Gaussian filter delay
+        for _ in 0..(sps * 3 / 2) {
+            clk.next();
+        }
+
+        $assert(!o_aa_match);
+
+        // Shift preamble & access address
+        for _ in 0..(sps * (32 + 8)) {
+            clk.next();
+        }
+
+        $assert(o_cfo <= offset + 1);
+        $assert(o_cfo >= offset - 1);
+        $assert(frame_detector.corr <= amplitude + 10);
+        $assert(frame_detector.corr >= amplitude - 10);
+        $assert(o_aa_match);
+
+        // Shift 6/8 preamble
+        for _ in 0..3 {
+            clk.next();
+            clk.next();
+            $assert(o_demod <: offset);
+            clk.next();
+            $assert(o_demod <: offset);
+            clk.next();
+
+            clk.next();
+            clk.next();
+            $assert(o_demod >: offset);
+            clk.next();
+            $assert(o_demod >: offset);
+            clk.next();
+        }
+
+        // Shift access address
+        for i in 0..32 {
+            clk.next();
+            clk.next();
+            if access_address[i] {
+                $assert(o_demod >: offset);
+            } else {
+                $assert(o_demod <: offset);
+            }
+            clk.next();
+            if access_address[i] {
+                $assert(o_demod >: offset);
+            } else {
+                $assert(o_demod <: offset);
+            }
+            clk.next();
+        }
+    }
 }
