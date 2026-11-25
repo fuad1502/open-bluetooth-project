@@ -211,6 +211,7 @@ module frame_detector_test {
     const amplitude     : i32 = 100;
     const magnitude     : i32 = 50;
     const offset        : i32 = 30;
+    const noise_db      : i32 = 60;
     const access_address: u32 = 32'h8E89BED6;
 
     var i_demod   : signed logic<width>;
@@ -235,6 +236,7 @@ module frame_detector_test {
 
     var i_amplitude: signed logic<width>;
     var i_offset   : signed logic<width>;
+    var i_noise_db : signed logic<width>;
     var i_data     : u64                ;
     var i_data_en  : logic              ;
 
@@ -245,6 +247,7 @@ module frame_detector_test {
     ) (
         i_amplitude         ,
         i_offset            ,
+        i_noise_db          ,
         i_data              ,
         i_data_en           ,
         o_data     : i_demod,
@@ -257,6 +260,7 @@ module frame_detector_test {
         i_mag       = magnitude;
         i_amplitude = amplitude;
         i_offset    = offset;
+        i_noise_db  = noise_db;
         i_data      = {access_address, 8'b10101010};
         i_data_en   = 1;
 

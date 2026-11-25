@@ -18,6 +18,7 @@ pub struct SymbolGenerator {
     rst: ResetPort,
     i_amplitude: InputPort,
     i_offset: InputPort,
+    i_noise_db: InputPort,
     i_data: InputPort,
     i_data_en: InputPort,
     o_data: OutputPort,
@@ -35,6 +36,9 @@ impl SymbolGenerator {
             return Err(Error::msg("Port size mismatch"));
         }
         if ctx.input("i_offset").unwrap().width() != self.width {
+            return Err(Error::msg("Port size mismatch"));
+        }
+        if ctx.input("i_noise_db").unwrap().width() != self.width {
             return Err(Error::msg("Port size mismatch"));
         }
         if ctx.input("i_data").unwrap().width() != 64 {
@@ -65,7 +69,9 @@ impl SymbolGenerator {
 
     fn on_clock(&mut self, ctx: &mut SimCtx) -> Result<()> {
         let o_data = self.calc_symbol(ctx);
-        ctx.write_u64(self.o_data, o_data);
+        let o_noise = self.calc_noise(ctx);
+        let o_total = o_data + o_noise;
+        ctx.write_u64(self.o_data, o_total as u64);
 
         let i_data_en = ctx.read(self.i_data_en).as_bool();
         let i_data = ctx.read_u64(self.i_data);
@@ -85,7 +91,7 @@ impl SymbolGenerator {
 }
 
 impl SymbolGenerator {
-    fn calc_symbol(&mut self, ctx: &mut SimCtx) -> u64 {
+    fn calc_symbol(&mut self, ctx: &mut SimCtx) -> i64 {
         let symbol = if let Some(data) = self.data_buffer.first() {
             let bit = (data >> (self.sample / self.sps as usize) & 0b1) as i64;
             self.sample += 1;
@@ -109,7 +115,20 @@ impl SymbolGenerator {
             .map(|x| x * amplitude + offset)
             .zip(&self.impulse_response)
             .map(|(x, h)| x as f64 * h)
-            .sum::<f64>() as i64 as u64
+            .sum::<f64>() as i64
+    }
+
+    fn calc_noise(&self, ctx: &mut SimCtx) -> i64 {
+        let amplitude = ctx.read_u64(self.i_amplitude) as i64;
+        let noise_db = ctx.read_u64(self.i_noise_db) as i64;
+        let loss = 10f64.powf((-noise_db) as f64 / 20.0);
+        let noise_amplitude = (amplitude as f64 * loss) as i64;
+
+        if noise_amplitude == 0 {
+            0
+        } else {
+            rand::random_range(-noise_amplitude..noise_amplitude)
+        }
     }
 }
 
@@ -135,6 +154,7 @@ mod tests {
             .reset_port("rst")
             .input("i_amplitude", width)
             .input("i_offset", width)
+            .input("i_noise_db", width)
             .input("i_data", 64)
             .input("i_data_en", 1)
             .output("o_data", width);
@@ -143,6 +163,7 @@ mod tests {
         sim.reset(&mut c).unwrap();
         sim.set("i_amplitude", amplitude);
         sim.set("i_offset", offset);
+        sim.set("i_noise_db", 100);
         sim.set("i_data", data);
         sim.set("i_data_en", 1);
         sim.clock(&mut c).unwrap();

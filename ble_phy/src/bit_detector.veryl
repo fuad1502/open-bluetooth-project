@@ -37,7 +37,7 @@ module BitDetector #(
         if !i_process {
             detect_1[0] = 0;
             detect_1[1] = 0;
-            detect_2[0] = 1;
+            detect_2[0] = 0;
             detect_2[1] = 0;
             detect_en   = 0;
         } else if i_clk_en {
@@ -103,6 +103,7 @@ module bit_detector_test {
     const sps           : u32 = 4;
     const amplitude     : i32 = (1 << 29);
     const offset        : i32 = 30;
+    const noise_db      : i32 = 60;
     const access_address: u32 = 32'h8E89BED6;
 
     var i_demod  : signed logic<width>;
@@ -123,6 +124,7 @@ module bit_detector_test {
     );
 
     var i_amplitude: signed logic<width>;
+    var i_noise_db : signed logic<width>;
     var i_data     : u64                ;
     var i_data_en  : logic              ;
 
@@ -133,6 +135,7 @@ module bit_detector_test {
     ) (
         i_amplitude         ,
         i_offset   : i_cfo  ,
+        i_noise_db          ,
         i_data              ,
         i_data_en           ,
         o_data     : i_demod,
@@ -145,6 +148,7 @@ module bit_detector_test {
         i_cfo       = 10;
         i_process   = 0;
         i_amplitude = amplitude;
+        i_noise_db  = noise_db;
         i_data      = {access_address, 8'b10101010};
         i_data_en   = 1;
 
@@ -163,9 +167,7 @@ module bit_detector_test {
         // Check: with no noise it's possible to stuck at inverted stable point
         for _ in 0..((32 + 8) * sps) {
             clk.next();
-            if o_sample {
-                $display("%d", o_bit);
-            }
+            $display("%d: %d", o_sample, bit_detector.detect_0);
         }
     }
 }
