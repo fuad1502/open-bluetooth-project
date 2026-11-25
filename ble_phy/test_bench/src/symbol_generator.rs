@@ -1,0 +1,179 @@
+use std::f64::consts::{LN_2, PI};
+
+use veryl_component::*;
+
+#[derive(Component)]
+#[component(kind = clocked)]
+pub struct SymbolGenerator {
+    #[param(name = "Width")]
+    width: u32,
+    #[param(name = "SamplesPerSymbol")]
+    sps: u32,
+    #[param(name = "InverseBT")]
+    inverse_bt: u32,
+
+    #[allow(dead_code)]
+    clk: ClockPort,
+    #[allow(dead_code)]
+    rst: ResetPort,
+    i_amplitude: InputPort,
+    i_offset: InputPort,
+    i_data: InputPort,
+    i_data_en: InputPort,
+    o_data: OutputPort,
+
+    data_buffer: Vec<u64>,
+    output_buffer: Vec<i64>,
+    impulse_response: Vec<f64>,
+    sample: usize,
+}
+
+#[component_impl]
+impl SymbolGenerator {
+    fn on_build(&mut self, ctx: &mut BuildCtx) -> Result<()> {
+        if ctx.input("i_amplitude").unwrap().width() != self.width {
+            return Err(Error::msg("Port size mismatch"));
+        }
+        if ctx.input("i_offset").unwrap().width() != self.width {
+            return Err(Error::msg("Port size mismatch"));
+        }
+        if ctx.input("i_data").unwrap().width() != 64 {
+            return Err(Error::msg("Port size mismatch"));
+        }
+        if ctx.output("o_data").unwrap().width() != self.width {
+            return Err(Error::msg("Port size mismatch"));
+        }
+
+        let buffer_size = self.sps as usize * 3 + (if self.sps % 2 == 0 { 1 } else { 0 });
+        self.output_buffer.resize(buffer_size, -1);
+        self.impulse_response.resize(buffer_size, 0.0);
+
+        let sigma = f64::sqrt(LN_2) * self.inverse_bt as f64 / (2.0 * PI);
+        for i in 0..buffer_size {
+            self.impulse_response[i] = f64::exp(
+                -1.0 * f64::abs(i as f64 - buffer_size as f64 / 2.0) / (2.0 * sigma.powi(2)),
+            );
+        }
+
+        let scale: f64 = self.impulse_response.iter().sum();
+        self.impulse_response
+            .iter_mut()
+            .for_each(|x| *x = *x / scale);
+
+        Ok(())
+    }
+
+    fn on_clock(&mut self, ctx: &mut SimCtx) -> Result<()> {
+        let o_data = self.calc_symbol(ctx);
+        ctx.write_u64(self.o_data, o_data);
+
+        let i_data_en = ctx.read(self.i_data_en).as_bool();
+        let i_data = ctx.read_u64(self.i_data);
+        if i_data_en {
+            self.data_buffer.push(i_data);
+        }
+
+        Ok(())
+    }
+
+    fn on_reset(&mut self, ctx: &mut SimCtx) -> Result<()> {
+        self.data_buffer.clear();
+        self.sample = 0;
+        ctx.write_u64(self.o_data, 0);
+        Ok(())
+    }
+}
+
+impl SymbolGenerator {
+    fn calc_symbol(&mut self, ctx: &mut SimCtx) -> u64 {
+        let symbol = if let Some(data) = self.data_buffer.first() {
+            let bit = (data >> (self.sample / self.sps as usize) & 0b1) as i64;
+            self.sample += 1;
+            bit * 2 - 1
+        } else {
+            -1
+        };
+
+        if self.sample >= (64 * self.sps) as usize {
+            self.sample = 0;
+            self.data_buffer.remove(0);
+        }
+
+        let offset = ctx.read_u64(self.i_offset) as i64;
+        let amplitude = ctx.read_u64(self.i_amplitude) as i64;
+
+        self.output_buffer.insert(0, symbol);
+        self.output_buffer.pop();
+        self.output_buffer
+            .iter()
+            .map(|x| x * amplitude + offset)
+            .zip(&self.impulse_response)
+            .map(|(x, h)| x as f64 * h)
+            .sum::<f64>() as i64 as u64
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use veryl_component::testing::MockSim;
+
+    #[test]
+    fn test() {
+        let width = 32;
+        let sps = 4;
+        let inverse_bt = 2;
+        let amplitude = 50;
+        let offset = 10;
+        let data = 0b11110101;
+
+        let mut sim = MockSim::new()
+            .param("Width", width)
+            .param("SamplesPerSymbol", sps)
+            .param("InverseBT", inverse_bt)
+            .clock_port("clk")
+            .reset_port("rst")
+            .input("i_amplitude", width)
+            .input("i_offset", width)
+            .input("i_data", 64)
+            .input("i_data_en", 1)
+            .output("o_data", width);
+        let mut c = sim.build::<SymbolGenerator>().unwrap();
+
+        sim.reset(&mut c).unwrap();
+        sim.set("i_amplitude", amplitude);
+        sim.set("i_offset", offset);
+        sim.set("i_data", data);
+        sim.set("i_data_en", 1);
+        sim.clock(&mut c).unwrap();
+        sim.set("i_data_en", 0);
+
+        for _ in 0..(sps * 3 / 2) {
+            sim.clock(&mut c).unwrap();
+        }
+
+        for i in 0..8 {
+            let expected = (data >> i) & 0b1;
+
+            sim.clock(&mut c).unwrap();
+
+            sim.clock(&mut c).unwrap();
+            let data = sim.get("o_data").as_i64().unwrap();
+            if expected == 1 {
+                assert!(data > offset);
+            } else {
+                assert!(data < offset);
+            }
+
+            sim.clock(&mut c).unwrap();
+            let data = sim.get("o_data").as_i64().unwrap();
+            if expected == 1 {
+                assert!(data > offset);
+            } else {
+                assert!(data < offset);
+            }
+
+            sim.clock(&mut c).unwrap();
+        }
+    }
+}
