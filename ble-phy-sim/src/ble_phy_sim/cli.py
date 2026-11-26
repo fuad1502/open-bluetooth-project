@@ -369,12 +369,14 @@ def main() -> None:
         chsel = bits_to_int(header[5:6])
         txadd = bits_to_int(header[6:7])
         rxadd = bits_to_int(header[7:8])
+        pdu_length = bits_to_int(header[8:16])
+        print(f"PDU Header: {format(bits_to_int(header), '016b')}")
         print(f"PDU Type: {pdu_type}")
         print(f"RFU: {rfu}")
         print(f"CH sel: {chsel}")
         print(f"TX Add: {txadd}")
         print(f"Rx Add: {rxadd}")
-        pdu_length = bits_to_int(header[8:16])
+        print(f"PDU Length: {pdu_length}")
         pdu = dewhiten_out[0 : (pdu_length + 2) * 8]
 
         # CRC
@@ -384,6 +386,20 @@ def main() -> None:
         calculated_crc = calculate_crc(pdu)
         print(f"Received CRC: {hex(crc)}")
         print(f"Calculated CRC: {hex(bits_to_int(calculated_crc))}")
+
+        # Print raw unwhitened bits for Veryl test bench
+        total_len = 6 + 32 + 16 + pdu_length * 8 + 24
+        print(f"Unwhitened bits: ({total_len} bits)")
+        for i in range(total_len):
+            print(f"{int(bits[total_len - 1 - i])}", end="")
+        print()
+
+        # Print raw PDU payload bits for Veryl test bench
+        total_len = pdu_length * 8
+        print(f"PDU payload bits: ({total_len} bits)")
+        for i in range(total_len):
+            print(f"{int(pdu[16 + total_len - 1 - i])}", end="")
+        print()
 
         # ==========================================================================
         # LINK LAYER CONTROL (MCU)
