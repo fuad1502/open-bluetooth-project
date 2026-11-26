@@ -1,0 +1,162 @@
+module BitProcessing #(
+    param PDUHeaderLen: u32 = 16 ,
+    param PDUMaxLen   : u32 = 256,
+    param CRCLen      : u32 = 24 ,
+) (
+    i_bit     : input  logic                         ,
+    i_sample  : input  logic                         ,
+    i_aa      : input  logic<32>                     ,
+    i_ch_idx  : input  logic<6>                      ,
+    i_crc_init: input  logic<24>           = 'h555555,
+    o_pdu     : output logic<PDUMaxLen>              ,
+    o_header  : output logic<PDUHeaderLen>           ,
+    o_valid   : output logic                         ,
+    i_clk     : input  clock                         ,
+    i_rst     : input  reset                         ,
+    i_clk_en  : input  logic                         ,
+) {
+    /* Find Access Address */
+    var aa_buffer  : logic<32>;
+    var found_frame: logic    ;
+
+    always_ff {
+        if i_clk_en && !found_frame {
+            aa_buffer[0] = i_bit;
+            for i in 1..32 {
+                aa_buffer[i] = aa_buffer[i - 1];
+            }
+
+            if aa_buffer == i_aa {
+                found_frame = 1;
+            }
+        }
+    }
+
+    /* Dewhiten */
+    var bit_dewhiten: logic;
+
+    inst dewhiten: Dewhiten (
+        i_bit                      ,
+        i_ch_idx                   ,
+        i_found_frame: found_frame ,
+        o_bit        : bit_dewhiten,
+        i_clk                      ,
+        i_rst                      ,
+        i_clk_en                   ,
+    );
+
+    /* Latch PDU header */
+    var header_count: logic<$clog2(PDUHeaderLen + 1)>;
+    let found_header: logic                           = header_count == PDUHeaderLen;
+    let pdu_len      = o_header[15:8];
+
+    always_ff {
+        if i_clk_en && found_frame && !found_header {
+            header_count += 1;
+            o_header     =  (o_header << 1) + bit_dewhiten;
+        }
+    }
+
+    /* Latch PDU */
+    var pdu_count: logic<$clog2(PDUMaxLen + 1)>;
+    let found_pdu: logic                        = pdu_count == pdu_len;
+
+    always_ff {
+        if i_clk_en && found_header && !found_pdu {
+            pdu_count += 1;
+            o_pdu     =  (o_pdu << 1) + bit_dewhiten;
+        }
+    }
+
+    /* Calculate CRC */
+    var calculated_crc: logic<CRCLen>;
+
+    inst crc: Crc (
+        i_bit                                   ,
+        i_crc_init                              ,
+        i_found_frame: found_frame && !found_pdu,
+        o_crc        : calculated_crc           ,
+        i_clk                                   ,
+        i_rst                                   ,
+        i_clk_en                                ,
+    );
+
+    /* Latch CRC */
+    var crc_count   : logic<$clog2(CRCLen + 1)>;
+    let found_crc   : logic                     = crc_count == CRCLen;
+    var received_crc: logic<CRCLen>            ;
+
+    always_ff {
+        if i_clk_en && found_pdu && !found_crc {
+            crc_count    += 1;
+            received_crc =  (received_crc << 1) + bit_dewhiten;
+        }
+    }
+
+    assign o_valid = received_crc == calculated_crc;
+}
+
+module Dewhiten (
+    i_bit        : input  logic   ,
+    i_ch_idx     : input  logic<6>,
+    i_found_frame: input  logic   ,
+    o_bit        : output logic   ,
+    i_clk        : input  clock   ,
+    i_rst        : input  reset   ,
+    i_clk_en     : input  logic   ,
+) {
+    var lsfr: logic<7>;
+
+    always_ff {
+        if i_clk_en {
+            if !i_found_frame {
+                lsfr[0] = 1;
+                for i in 1..7 {
+                    lsfr[i] = i_ch_idx[7 - i];
+                }
+            } else {
+                lsfr[0] = lsfr[6];
+                lsfr[1] = lsfr[0];
+                lsfr[2] = lsfr[1];
+                lsfr[3] = lsfr[2];
+                lsfr[4] = lsfr[3] ^ lsfr[6];
+                lsfr[5] = lsfr[4];
+                lsfr[6] = lsfr[5];
+            }
+        }
+    }
+
+    assign o_bit = i_bit ^ lsfr[6];
+}
+
+module Crc (
+    i_bit        : input  logic    ,
+    i_crc_init   : input  logic<24>,
+    i_found_frame: input  logic    ,
+    o_crc        : output logic<24>,
+    i_clk        : input  clock    ,
+    i_rst        : input  reset    ,
+    i_clk_en     : input  logic    ,
+) {
+    var lsfr: logic<24>;
+
+    always_ff {
+        if i_clk_en {
+            if !i_found_frame {
+                lsfr = i_crc_init;
+            } else {
+                let feedback: logic = lsfr[23] ^ i_bit;
+                lsfr[0]  = feedback;
+                for i in 1..24 {
+                    if i == 1 || i == 3 || i == 4 || i == 6 || i == 9 || i == 10 {
+                        lsfr[i] = lsfr[i - 1] ^ (lsfr[23] ^ feedback);
+                    } else {
+                        lsfr[i] = lsfr[i - 1];
+                    }
+                }
+            }
+        }
+    }
+
+    assign o_crc = lsfr;
+}
