@@ -14,9 +14,13 @@ module BitDetector #(
 ) {
     var cfo        : signed logic<Width>;
     var cfo_latched: logic              ;
+    let demod_cfo  : signed logic<Width> = i_demod - cfo;
 
     always_ff {
-        if i_clk_en {
+        if !i_rst {
+            cfo         = 0;
+            cfo_latched = 0;
+        } else if i_clk_en {
             if !cfo_latched {
                 cfo         = i_cfo;
                 cfo_latched = 1;
@@ -27,8 +31,12 @@ module BitDetector #(
     var demod_taps: signed logic<Width> [4];
 
     always_ff {
-        if i_clk_en && cfo_latched {
-            demod_taps[0] = i_demod - cfo;
+        if !i_rst {
+            for i in 0..4 {
+                demod_taps[i] = 0;
+            }
+        } else if i_clk_en && cfo_latched {
+            demod_taps[0] = demod_cfo;
             for i in 1..4 {
                 demod_taps[i] = demod_taps[i - 1];
             }
@@ -42,12 +50,25 @@ module BitDetector #(
     type ExpandedType = signed logic<Width * 2>;
 
     let error       : ExpandedType        = (demod_taps[1] as ExpandedType
-        * (i_demod as ExpandedType - demod_taps[3] as ExpandedType));
+        * (demod_cfo as ExpandedType - demod_taps[3] as ExpandedType));
     let scaled_error: signed logic<Width> = (error >>> Fractions >>> GardnerLoopKp) as Width;
 
     always_ff {
-        if i_clk_en && cfo_latched {
-            if sample_phase == 0 {
+        if !i_rst {
+            sample_phase       = 0;
+            sample_phase_reset = 3;
+            phase_error_acc    = 0;
+            o_sample           = 0;
+            o_bit              = 0;
+        } else if i_clk_en && cfo_latched {
+            if sample_phase == sample_phase_reset {
+                sample_phase = 0;
+                o_sample     = 0;
+            } else if sample_phase == 0 {
+                sample_phase += 1;
+                o_sample     =  1;
+                o_bit        =  demod_cfo >: 0;
+            } else if sample_phase == 1 {
                 if phase_error_acc >: PhaseErrorThreshold {
                     sample_phase_reset = 2;
                     phase_error_acc    = scaled_error;
@@ -59,11 +80,7 @@ module BitDetector #(
                     phase_error_acc    += scaled_error;
                 }
                 sample_phase += 1;
-                o_sample     =  1;
-                o_bit        =  i_demod >: 0;
-            } else if sample_phase == sample_phase_reset {
-                sample_phase = 0;
-                o_sample     = 0;
+                o_sample     =  0;
             } else {
                 sample_phase += 1;
                 o_sample     =  0;
@@ -94,7 +111,7 @@ module bit_detector_test {
         Width              : width             ,
         Fractions          : width - 3,
         PhaseErrorThreshold: (1 << (width - 4)),
-        GardnerLoopKp      : 2                 ,
+        GardnerLoopKp      : 3                 ,
     ) (
         i_demod        ,
         i_cfo          ,
@@ -115,8 +132,8 @@ module bit_detector_test {
         Fractions       : width - 2,
         SamplesPerSymbol: sps                    ,
         BT              : (1 << (width - 2)) >> 1,
-        SampleOffset    : (1 << (width - 2)) >> 1,
-        FreqOffsetPpm   : 100                    ,
+        SampleOffset    : (0 << (width - 2)) >> 1,
+        FreqOffsetPpm   : 20000                  ,
     ) (
         i_amplitude         ,
         i_offset   : i_cfo  ,
@@ -133,7 +150,7 @@ module bit_detector_test {
         i_cfo       = 10;
         i_amplitude = amplitude;
         i_noise_db  = noise_db;
-        i_data      = {access_address, 'b01010101};
+        i_data      = {'habcd123, access_address, 'b01010101};
         i_data_en   = 1;
 
         clk.next();
@@ -148,10 +165,16 @@ module bit_detector_test {
         rst_1.assert();
         clk.next();
 
-        // Check: with no noise it's possible to stuck at inverted stable point
-        for _ in 0..((32 + 8) * sps) {
+        var bit_count: u32;
+        bit_count = 0;
+        for _ in 0..(64 * sps) {
             clk.next();
-            $display("%d, %d: %d", bit_detector.sample_phase_reset, o_sample, bit_detector.i_demod);
+            if o_sample && bit_count <: 64 {
+                $assert(o_bit == ((i_data >> bit_count) & 'b1));
+                bit_count += 1;
+            }
         }
+
+        $assert(bit_count == 64);
     }
 }
