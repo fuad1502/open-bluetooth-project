@@ -16,17 +16,17 @@ module BitProcessing #(
     i_clk_en  : input  logic                         ,
 ) {
     /* Find Access Address */
-    var aa_buffer  : logic<32>;
+    var aa_buffer  : logic<31>;
     var found_frame: logic    ;
 
     always_ff {
         if i_clk_en && !found_frame {
-            aa_buffer[0] = i_bit;
-            for i in 1..32 {
-                aa_buffer[i] = aa_buffer[i - 1];
+            aa_buffer[30] = i_bit;
+            for i in 1..31 {
+                aa_buffer[30 - i] = aa_buffer[31 - i];
             }
 
-            if aa_buffer == i_aa {
+            if {i_bit, aa_buffer} == i_aa {
                 found_frame = 1;
             }
         }
@@ -47,49 +47,69 @@ module BitProcessing #(
 
     /* Latch PDU header */
     var header_count: logic<$clog2(PDUHeaderLen + 1)>;
-    let found_header: logic                           = header_count == PDUHeaderLen;
+    let found_header: logic                           = found_frame && header_count == PDUHeaderLen;
     let pdu_len      = o_header[15:8];
 
     always_ff {
         if i_clk_en && found_frame && !found_header {
-            header_count += 1;
-            o_header     =  (o_header << 1) + bit_dewhiten;
+            header_count               += 1;
+            o_header[PDUHeaderLen - 1] =  bit_dewhiten;
+            for i in 1..PDUHeaderLen {
+                o_header[PDUHeaderLen - i - 1] = o_header[PDUHeaderLen - i];
+            }
         }
     }
 
     /* Latch PDU */
-    var pdu_count: logic<$clog2(PDUMaxLen + 1)>;
-    let found_pdu: logic                        = pdu_count == pdu_len;
+    var pdu_count: logic<$clog2(PDUMaxLen * 8 + 1)>;
+    let found_pdu: logic                            = found_header && (pdu_count >> 3) == pdu_len;
 
     always_ff {
         if i_clk_en && found_header && !found_pdu {
-            pdu_count += 1;
-            o_pdu     =  (o_pdu << 1) + bit_dewhiten;
+            pdu_count            += 1;
+            o_pdu[PDUMaxLen - 1] =  bit_dewhiten;
+            for i in 1..PDUMaxLen {
+                o_pdu[PDUMaxLen - i - 1] = o_pdu[PDUMaxLen - i];
+            }
         }
     }
 
     /* Calculate CRC */
+    var crc_lsfr      : logic<CRCLen>;
     var calculated_crc: logic<CRCLen>;
+    var calc_crc      : logic        ;
 
     inst crc: Crc (
-        i_bit                                   ,
+        i_bit        : bit_dewhiten             ,
         i_crc_init                              ,
         i_found_frame: found_frame && !found_pdu,
-        o_crc        : calculated_crc           ,
+        o_crc        : crc_lsfr                 ,
         i_clk                                   ,
         i_rst                                   ,
         i_clk_en                                ,
     );
 
+    always_ff {
+        if i_clk_en && found_pdu && !calc_crc {
+            for i in 0..CRCLen {
+                calculated_crc[i] = crc_lsfr[CRCLen - i - 1];
+            }
+            calc_crc = 1;
+        }
+    }
+
     /* Latch CRC */
     var crc_count   : logic<$clog2(CRCLen + 1)>;
-    let found_crc   : logic                     = crc_count == CRCLen;
+    let found_crc   : logic                     = found_pdu && crc_count == CRCLen;
     var received_crc: logic<CRCLen>            ;
 
     always_ff {
         if i_clk_en && found_pdu && !found_crc {
-            crc_count    += 1;
-            received_crc =  (received_crc << 1) + bit_dewhiten;
+            crc_count                += 1;
+            received_crc[CRCLen - 1] =  bit_dewhiten;
+            for i in 1..CRCLen {
+                received_crc[CRCLen - i - 1] = received_crc[CRCLen - i];
+            }
         }
     }
 
@@ -112,7 +132,7 @@ module Dewhiten (
             if !i_found_frame {
                 lsfr[0] = 1;
                 for i in 1..7 {
-                    lsfr[i] = i_ch_idx[7 - i];
+                    lsfr[i] = i_ch_idx[6 - i];
                 }
             } else {
                 lsfr[0] = lsfr[6];
@@ -149,7 +169,7 @@ module Crc (
                 lsfr[0]  = feedback;
                 for i in 1..24 {
                     if i == 1 || i == 3 || i == 4 || i == 6 || i == 9 || i == 10 {
-                        lsfr[i] = lsfr[i - 1] ^ (lsfr[23] ^ feedback);
+                        lsfr[i] = lsfr[i - 1] ^ feedback;
                     } else {
                         lsfr[i] = lsfr[i - 1];
                     }
@@ -159,4 +179,60 @@ module Crc (
     }
 
     assign o_crc = lsfr;
+}
+
+#[test(bit_processing_test)]
+module bit_processing_test {
+    inst clk: $tb::clock_gen;
+    inst rst: $tb::reset_gen ( clk );
+
+    const access_address: u32 = 32'h8E89BED6;
+
+    // Raw bits from demodulated `Wearable_device_dataset/_example_radio_data/radio.data`. Channel 39, Frame 0.
+    const channel_idx   : u32 = 39;
+    const num_of_bits   : u32 = 286;
+    const bits: logic<num_of_bits> = {
+        286'b1010111011101000111100100100010010101111010011000111000111111010111111001001011011100111000001011101101010011001101000010100100100100100101000000101111101110101100011011010101110000101100110000100101111101101000010100101101101110100010110101111111100011101000100110111110110101101010101
+    };
+
+    var i_bit   : logic     ;
+    var o_pdu   : logic<256>;
+    var o_header: logic<16> ;
+    var o_valid : logic     ;
+
+    inst bit_processing: BitProcessing (
+        i_bit                   ,
+        i_sample: 1             ,
+        i_aa    : access_address,
+        i_ch_idx: channel_idx   ,
+        o_pdu                   ,
+        o_header                ,
+        o_valid                 ,
+        i_clk   : clk           ,
+        i_rst   : rst           ,
+        i_clk_en: 1             ,
+    );
+
+    initial {
+        rst.assert();
+
+        for i in 0..(8 + 32 + 16 + (26 * 8) + 24) {
+            i_bit = (bits >> i) & 1'b1;
+            clk.next();
+        }
+
+        $assert(bit_processing.found_frame);
+        $assert(bit_processing.found_header);
+        $assert(bit_processing.found_pdu);
+        $assert(bit_processing.found_crc);
+        $assert(bit_processing.received_crc == 'hb858e9);
+        $assert(bit_processing.calculated_crc == 'hb858e9);
+        $assert(bit_processing.o_valid);
+        $assert(bit_processing.o_header == 'b0001101001100000);
+        $assert(bit_processing.pdu_len == 26);
+        $assert(
+            bit_processing.o_pdu
+                == 'b0000000000110101010011010101100000110000001100000011000000110001001011010100100001010111010111110100010101001100000010010000111111111110000000110000001100000011010101101011100100000000000000000111001011110000000000000000000000000000000000000000000000000000,
+        );
+    }
 }
