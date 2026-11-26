@@ -241,9 +241,10 @@ module frame_detector_test {
     var i_data_en  : logic              ;
 
     inst symbol_generator: $comp::symbol_generator #(
-        Width           : width,
-        SamplesPerSymbol: sps  ,
-        InverseBT       : 2    ,
+        Width           : width                  ,
+        Fractions       : width - 2,
+        SamplesPerSymbol: sps                    ,
+        BT              : (1 << (width - 2)) >> 1,
     ) (
         i_amplitude         ,
         i_offset            ,

@@ -7,10 +7,12 @@ use veryl_component::*;
 pub struct SymbolGenerator {
     #[param(name = "Width")]
     width: u32,
+    #[param(name = "Fractions")]
+    fractions: u32,
     #[param(name = "SamplesPerSymbol")]
     sps: u32,
-    #[param(name = "InverseBT")]
-    inverse_bt: u32,
+    #[param(name = "BT")]
+    bt: u32,
 
     #[allow(dead_code)]
     clk: ClockPort,
@@ -51,18 +53,6 @@ impl SymbolGenerator {
         let buffer_size = self.sps as usize * 3 + (if self.sps % 2 == 0 { 1 } else { 0 });
         self.output_buffer.resize(buffer_size, -1);
         self.impulse_response.resize(buffer_size, 0.0);
-
-        let sigma = f64::sqrt(LN_2) * self.inverse_bt as f64 / (2.0 * PI);
-        for i in 0..buffer_size {
-            self.impulse_response[i] = f64::exp(
-                -1.0 * f64::abs(i as f64 - buffer_size as f64 / 2.0) / (2.0 * sigma.powi(2)),
-            );
-        }
-
-        let scale: f64 = self.impulse_response.iter().sum();
-        self.impulse_response
-            .iter_mut()
-            .for_each(|x| *x = *x / scale);
 
         Ok(())
     }
@@ -110,6 +100,9 @@ impl SymbolGenerator {
 
         self.output_buffer.insert(0, symbol);
         self.output_buffer.pop();
+
+        self.recalc_impulse_response(ctx);
+
         self.output_buffer
             .iter()
             .map(|x| x * amplitude + offset)
@@ -130,6 +123,22 @@ impl SymbolGenerator {
             rand::random_range(-noise_amplitude..noise_amplitude)
         }
     }
+
+    fn recalc_impulse_response(&mut self, _ctx: &mut SimCtx) {
+        let buffer_size = self.impulse_response.len();
+        let bt = self.bt as i32 as f64 / (1 << self.fractions) as f64;
+        let sigma = f64::sqrt(LN_2) / (2.0 * PI * bt);
+        for i in 0..buffer_size {
+            self.impulse_response[i] = f64::exp(
+                -1.0 * f64::abs(i as f64 - buffer_size as f64 / 2.0) / (2.0 * sigma.powi(2)),
+            );
+        }
+
+        let scale: f64 = self.impulse_response.iter().sum();
+        self.impulse_response
+            .iter_mut()
+            .for_each(|x| *x = *x / scale);
+    }
 }
 
 #[cfg(test)]
@@ -140,16 +149,18 @@ mod tests {
     #[test]
     fn test() {
         let width = 32;
+        let fractions = 30;
         let sps = 4;
-        let inverse_bt = 2;
+        let bt = (0.5 * (1 << fractions) as f64) as i32 as u32;
         let amplitude = 50;
         let offset = 10;
         let data = 0b11110101;
 
         let mut sim = MockSim::new()
             .param("Width", width)
+            .param("Fractions", fractions)
             .param("SamplesPerSymbol", sps)
-            .param("InverseBT", inverse_bt)
+            .param("BT", bt)
             .clock_port("clk")
             .reset_port("rst")
             .input("i_amplitude", width)
