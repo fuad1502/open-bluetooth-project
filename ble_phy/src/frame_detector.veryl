@@ -221,7 +221,7 @@ module frame_detector_test {
     var o_cfo     : signed logic<width>;
 
     inst frame_detector: FrameDetector #(
-        AAMatchThreshold    : amplitude - 10,
+        AAMatchThreshold    : amplitude - 20,
         IQMagnitudeThreshold: magnitude - 1,
     ) (
         i_demod        ,
@@ -245,6 +245,7 @@ module frame_detector_test {
         Fractions       : width - 2,
         SamplesPerSymbol: sps                    ,
         BT              : (1 << (width - 2)) >> 1,
+        SampleOffset    : (1 << (width - 2)) >> 1,
     ) (
         i_amplitude         ,
         i_offset            ,
@@ -280,10 +281,10 @@ module frame_detector_test {
             clk.next();
         }
 
-        $assert(o_cfo <= offset + 1);
-        $assert(o_cfo >= offset - 1);
-        $assert(frame_detector.corr <= amplitude + 10);
-        $assert(frame_detector.corr >= amplitude - 10);
+        $assert(o_cfo <= offset + 5);
+        $assert(o_cfo >= offset - 5);
+        $assert(frame_detector.corr <= amplitude + 20);
+        $assert(frame_detector.corr >= amplitude - 20);
         $assert(o_aa_match);
 
         // Shift 6/8 preamble

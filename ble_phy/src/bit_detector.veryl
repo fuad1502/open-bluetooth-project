@@ -115,6 +115,7 @@ module bit_detector_test {
         Fractions       : width - 2,
         SamplesPerSymbol: sps                    ,
         BT              : (1 << (width - 2)) >> 1,
+        SampleOffset    : (1 << (width - 2)) >> 1,
     ) (
         i_amplitude         ,
         i_offset   : i_cfo  ,
