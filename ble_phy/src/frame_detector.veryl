@@ -246,6 +246,7 @@ module frame_detector_test {
         SamplesPerSymbol: sps                    ,
         BT              : (1 << (width - 2)) >> 1,
         SampleOffset    : (1 << (width - 2)) >> 1,
+        FreqOffsetPpm   : 100                    ,
     ) (
         i_amplitude         ,
         i_offset            ,

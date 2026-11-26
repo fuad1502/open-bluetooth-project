@@ -15,6 +15,8 @@ pub struct SymbolGenerator {
     bt: u32,
     #[param(name = "SampleOffset")]
     sample_offset: u32,
+    #[param(name = "FreqOffsetPpm")]
+    freq_offset_ppm: u32,
 
     #[allow(dead_code)]
     clk: ClockPort,
@@ -31,6 +33,7 @@ pub struct SymbolGenerator {
     output_buffer: Vec<i64>,
     impulse_response: Vec<f64>,
     sample: usize,
+    offset_acc: f64,
 }
 
 #[component_impl]
@@ -77,6 +80,7 @@ impl SymbolGenerator {
     fn on_reset(&mut self, ctx: &mut SimCtx) -> Result<()> {
         self.data_buffer.clear();
         self.sample = 0;
+        self.offset_acc = 0.0;
         ctx.write_u64(self.o_data, 0);
         Ok(())
     }
@@ -92,8 +96,10 @@ impl SymbolGenerator {
             -1
         };
 
+        self.recalc_impulse_response(ctx);
+
         if self.sample >= (64 * self.sps) as usize {
-            self.sample = 0;
+            self.sample = self.sample % (64 * self.sps) as usize;
             self.data_buffer.remove(0);
         }
 
@@ -102,8 +108,6 @@ impl SymbolGenerator {
 
         self.output_buffer.insert(0, symbol);
         self.output_buffer.pop();
-
-        self.recalc_impulse_response(ctx);
 
         self.output_buffer
             .iter()
@@ -130,10 +134,21 @@ impl SymbolGenerator {
         let buffer_size = self.impulse_response.len();
         let bt = self.bt as i32 as f64 / (1 << self.fractions) as f64;
         let sample_offset = self.sample_offset as i32 as f64 / (1 << self.fractions) as f64;
+        let freq_offset_ppm = self.freq_offset_ppm as i32 as f64;
+
+        self.offset_acc += freq_offset_ppm / 1e6;
+
+        if self.offset_acc >= 1.0 {
+            self.offset_acc -= 1.0;
+            self.sample += 1;
+        } else if self.offset_acc <= -1.0 {
+            self.offset_acc += 1.0;
+            self.sample -= 1;
+        }
 
         let sigma = f64::sqrt(LN_2) / (2.0 * PI * bt) * self.sps as f64;
         for i in 0..buffer_size {
-            let n = i as f64 - buffer_size as f64 / 2.0 + 0.5 + sample_offset;
+            let n = i as f64 - buffer_size as f64 / 2.0 + 0.5 + sample_offset + self.offset_acc;
             self.impulse_response[i] = f64::exp(-1.0 * n.powi(2) / (2.0 * sigma.powi(2)));
         }
 
@@ -156,6 +171,7 @@ mod tests {
         let sps = 4;
         let bt = (0.5 * (1 << fractions) as f64) as i32 as u32;
         let sample_offset = (0.25 * (1 << fractions) as f64) as i32 as u32;
+        let freq_offset_ppm = 100;
         let amplitude = 50;
         let offset = 10;
         let data = 0b11110101;
@@ -166,6 +182,7 @@ mod tests {
             .param("SamplesPerSymbol", sps)
             .param("BT", bt)
             .param("SampleOffset", sample_offset)
+            .param("FreqOffsetPpm", freq_offset_ppm)
             .clock_port("clk")
             .reset_port("rst")
             .input("i_amplitude", width)

@@ -116,6 +116,7 @@ module bit_detector_test {
         SamplesPerSymbol: sps                    ,
         BT              : (1 << (width - 2)) >> 1,
         SampleOffset    : (1 << (width - 2)) >> 1,
+        FreqOffsetPpm   : 100                    ,
     ) (
         i_amplitude         ,
         i_offset   : i_cfo  ,
@@ -150,7 +151,7 @@ module bit_detector_test {
         // Check: with no noise it's possible to stuck at inverted stable point
         for _ in 0..((32 + 8) * sps) {
             clk.next();
-            $display("%d: %d", o_sample, bit_detector.i_demod);
+            $display("%d, %d: %d", bit_detector.sample_phase_reset, o_sample, bit_detector.i_demod);
         }
     }
 }
