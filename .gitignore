@@ -1,0 +1,9 @@
+# LiteX artifacts
+*.bin
+*.fbi
+csr.csv
+build/
+demo/
+
+# My local notes
+notes/
