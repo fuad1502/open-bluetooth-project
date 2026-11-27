@@ -1,0 +1,8 @@
+module Top #(
+    param Width: u32 = 32,
+) (
+    i_inphase   : input signed logic<Width>,
+    i_quadrature: input signed logic<Width>,
+    i_clk       : input clock              ,
+    i_rst       : input reset              ,
+) {}
