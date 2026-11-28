@@ -5,5 +5,9 @@ csr.csv
 build/
 demo/
 
+# Vivado artifacts
+vivado*.jou
+vivado*.log
+
 # My local notes
 notes/
